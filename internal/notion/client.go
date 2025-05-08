@@ -2,6 +2,7 @@ package notion
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -37,6 +38,15 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 		// Continue anyway but be more cautious
 	}
 
+	// Log all database properties for debugging
+	if dbProps != nil {
+		log.Printf("Database properties found: %d", len(dbProps))
+		for name, prop := range dbProps {
+			propType := prop.GetType()
+			log.Printf("DB Property: %s (Type: %s)", name, propType)
+		}
+	}
+
 	// Create the base request with title property
 	page := &notionapi.PageCreateRequest{
 		Parent: notionapi.Parent{
@@ -61,8 +71,8 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 		log.Printf("Processing property: %s = %v", key, value)
 
 		// Skip known button properties or properties that might be buttons
-		if key == "complete" || key == "status" {
-			log.Printf("Skipping potential button property: %s", key)
+		if key == "complete" || key == "status" || key == "done" || key == "button" {
+			log.Printf("Skipping known button property: %s", key)
 			continue
 		}
 
@@ -77,6 +87,10 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 					log.Printf("Skipping button property: %s", key)
 					continue
 				}
+			} else {
+				// Property doesn't exist in database schema
+				log.Printf("Property %s does not exist in database schema, skipping", key)
+				continue
 			}
 		}
 
@@ -151,6 +165,19 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 	createdPage, err := c.client.Page.Create(ctx, page)
 	if err != nil {
 		log.Printf("Error creating task in Notion: %v", err)
+
+		// Check if it's a button property error
+		if err.Error() == "unsupported property type: button" {
+			log.Printf("CRITICAL: Button property error detected despite filtering!")
+			log.Printf("Properties after filtering: %v", page.Properties)
+
+			// Further diagnose which property might be causing it
+			for key, prop := range page.Properties {
+				propJSON, _ := json.Marshal(prop)
+				log.Printf("Property %s: %s", key, string(propJSON))
+			}
+		}
+
 		return fmt.Errorf("Notion API error: %w", err)
 	}
 

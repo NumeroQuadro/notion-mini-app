@@ -14,6 +14,9 @@ function logAction(action, data) {
     }).catch(err => console.error('Error logging:', err));
 }
 
+// Known button property names - centralized list
+const BUTTON_PROPERTIES = ['complete', 'status', 'done', 'button', 'checkbox'];
+
 // Get database properties from the backend
 async function getDatabaseProperties() {
     try {
@@ -29,11 +32,12 @@ async function getDatabaseProperties() {
         logAction('Properties fetched', properties);
         
         // Handle button properties specially
-        if (properties.complete && !properties.complete.type) {
-            properties.complete.type = 'button';
-        }
-        if (properties.status && !properties.status.type) {
-            properties.status.type = 'button';
+        for (const [key, config] of Object.entries(properties)) {
+            // Mark known button properties explicitly or properties with no type
+            if (BUTTON_PROPERTIES.includes(key.toLowerCase()) || !config.type) {
+                logAction('Marking potential button property', { key });
+                properties[key].type = 'button';
+            }
         }
         
         return properties;
@@ -249,9 +253,6 @@ async function handleSubmit(event) {
     const form = event.target;
     const formElements = form.elements;
     
-    // Known button property names to skip
-    const buttonPropertyNames = ['complete', 'status', 'button', 'done'];
-    
     // Process each form element
     for (let i = 0; i < formElements.length; i++) {
         const element = formElements[i];
@@ -262,14 +263,16 @@ async function handleSubmit(event) {
         }
         
         // Skip button properties by name
-        if (buttonPropertyNames.includes(element.id.toLowerCase())) {
+        if (BUTTON_PROPERTIES.includes(element.id.toLowerCase())) {
             logAction('Skipping known button property', { id: element.id });
             continue;
         }
         
         // Skip properties identified as buttons in database schema
-        if (dbProperties && dbProperties[element.id] && dbProperties[element.id].type === 'button') {
-            logAction('Skipping button property from schema', { id: element.id });
+        if (dbProperties && 
+            (dbProperties[element.id]?.type === 'button' || 
+             dbProperties[element.name]?.type === 'button')) {
+            logAction('Skipping button property from schema', { id: element.id || element.name });
             continue;
         }
         

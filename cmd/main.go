@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"log"
 	"net/http"
 	"os"
@@ -16,6 +17,23 @@ import (
 )
 
 func main() {
+	// Define command-line flags
+	debugMode := flag.Bool("debug", false, "Run in debug mode to diagnose database properties")
+	debugTaskMode := flag.Bool("debug-task", false, "Run in debug task mode to test task creation directly")
+	flag.Parse()
+
+	// Run debug mode if requested
+	if *debugMode {
+		runDebugMode()
+		return
+	}
+
+	// Run debug task mode if requested
+	if *debugTaskMode {
+		debugTaskCreation()
+		return
+	}
+
 	// Load environment variables
 	if err := godotenv.Load(); err != nil {
 		log.Printf("Warning: .env file not found, using environment variables")
@@ -98,6 +116,9 @@ func serveStaticFiles() {
 	http.HandleFunc("/notion/mini-app/api/properties", handleProperties)
 	http.HandleFunc("/notion/mini-app/api/log", handleLogs)
 
+	// Debug endpoints - disable in production
+	http.HandleFunc("/notion/mini-app/api/debug/task", handleDebugTask)
+
 	// Also serve files at the root for local development
 	http.Handle("/", fs)
 
@@ -166,20 +187,53 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Create Notion client to get database properties
+	notionClient := notion.NewClient()
+	ctx := context.Background()
+
+	// Attempt to get database properties to identify button properties
+	dbProps, err := notionClient.GetDatabaseProperties(ctx)
+	var buttonProps []string
+	if err != nil {
+		log.Printf("Warning: Could not fetch database properties: %v", err)
+		// Use default known button property names
+		buttonProps = []string{"complete", "status", "done", "button"}
+	} else {
+		// Identify all button properties from the database schema
+		for name, prop := range dbProps {
+			if prop.GetType() == "button" {
+				buttonProps = append(buttonProps, name)
+				log.Printf("Identified button property in schema: %s", name)
+			}
+		}
+
+		// Add known button names just to be safe
+		buttonProps = append(buttonProps, "complete", "status", "done", "button")
+	}
+
 	// Filter out button properties to avoid Notion API errors
 	filteredProperties := make(map[string]interface{})
 	for key, value := range taskReq.Properties {
-		// Skip properties that are likely buttons
-		if key == "complete" || key == "status" {
-			log.Printf("Skipping potential button property in handler: %s", key)
-			continue
+		shouldSkip := false
+
+		// Check against our list of button properties
+		for _, buttonProp := range buttonProps {
+			if key == buttonProp {
+				log.Printf("Skipping known button property in handler: %s", key)
+				shouldSkip = true
+				break
+			}
 		}
-		filteredProperties[key] = value
+
+		if !shouldSkip {
+			filteredProperties[key] = value
+		}
 	}
 
+	log.Printf("After filtering: %d properties remaining of %d original properties",
+		len(filteredProperties), len(taskReq.Properties))
+
 	// Create the task in Notion
-	notionClient := notion.NewClient()
-	ctx := context.Background()
 	if err := notionClient.CreateTask(ctx, taskReq.Title, filteredProperties); err != nil {
 		log.Printf("Error creating task in Notion: %v", err)
 		sendJSONError(http.StatusInternalServerError, "Failed to create task: "+err.Error())
@@ -334,4 +388,60 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 
 	// Return success
 	w.WriteHeader(http.StatusOK)
+}
+
+// Debug endpoint for creating a task with minimal properties
+func handleDebugTask(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Handling debug task request from %s", r.RemoteAddr)
+
+	// Set CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Content-Type", "application/json")
+
+	// Only allow in non-production environments
+	if os.Getenv("ENVIRONMENT") == "production" {
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "error",
+			"message": "Debug endpoints not available in production",
+		})
+		return
+	}
+
+	// Create a task with minimal properties
+	notionClient := notion.NewClient()
+	ctx := context.Background()
+
+	// Get the title from query parameter or use default
+	title := r.URL.Query().Get("title")
+	if title == "" {
+		title = "Debug Task - " + time.Now().Format(time.RFC3339)
+	}
+
+	// Minimal properties (just a date)
+	properties := map[string]interface{}{
+		"Date": time.Now().Format("2006-01-02"),
+	}
+
+	// Create the task
+	err := notionClient.CreateTask(ctx, title, properties)
+
+	if err != nil {
+		log.Printf("Error creating debug task: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "error",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	// Return success
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Debug task created successfully",
+	})
 }
