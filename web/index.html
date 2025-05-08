@@ -13,6 +13,9 @@
     <div class="container">
         <h1>Create New Task</h1>
         <div id="error-container" class="error-message" style="display: none;"></div>
+        <div style="text-align: right; margin-bottom: 10px;">
+            <button type="button" id="testConfigBtn" class="test-btn">Test Config</button>
+        </div>
         <form id="taskForm">
             <div class="form-group">
                 <label for="taskTitle">Task Title</label>
@@ -27,5 +30,17 @@
         </form>
     </div>
     <script src="app.js"></script>
+    <script>
+        // Test button to check if the config endpoint is working
+        document.getElementById('testConfigBtn').addEventListener('click', async function() {
+            try {
+                const response = await fetch('/notion/mini-app/api/config');
+                const data = await response.json();
+                alert('Config loaded successfully: ' + JSON.stringify(data, null, 2));
+            } catch (error) {
+                alert('Error loading config: ' + error.message);
+            }
+        });
+    </script>
 </body>
 </html> 

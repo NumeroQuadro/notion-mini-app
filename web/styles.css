@@ -180,4 +180,24 @@ input[type="checkbox"] + label {
     .error-message {
         background-color: rgba(204, 0, 0, 0.1);
     }
+}
+
+.test-btn {
+    background-color: #f0f0f0;
+    color: #333;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.test-btn:hover {
+    background-color: #e0e0e0;
+}
+
+.test-btn:active {
+    background-color: #d0d0d0;
+    transform: translateY(1px);
 } 

@@ -19,92 +19,31 @@ const CHECKBOX_PROPERTIES = ['complete', 'status', 'done', 'complete'];
 
 // Initialize Notion Client (initialized on demand)
 let notionClient = null;
-let notionConfig = null;
+let appConfig = null;
 
-// Parse .env file to get configuration
-async function parseEnvFile() {
-    if (notionConfig) {
-        return notionConfig;
+// Fetch application configuration from server
+async function getAppConfig() {
+    if (appConfig) {
+        return appConfig;
     }
     
     try {
-        // Try multiple possible paths
-        const paths = [
-            '/.env',                // Server root
-            '/notion/mini-app/.env', // Mini app path
-            '.env',                  // Relative to current page
-            '../.env'                // Parent directory
-        ];
+        logAction('Fetching app config', {});
+        const response = await fetch('/notion/mini-app/api/config');
         
-        let response = null;
-        let text = null;
-        
-        // Try each path
-        for (const path of paths) {
-            try {
-                logAction('Trying to fetch .env from', { path });
-                const resp = await fetch(path);
-                if (resp.ok) {
-                    response = resp;
-                    logAction('Successfully fetched .env from', { path });
-                    break;
-                }
-            } catch (e) {
-                logAction('Failed to fetch .env from', { path, error: e.message });
-            }
+        if (!response.ok) {
+            throw new Error(`Failed to fetch config: ${response.status}`);
         }
         
-        if (!response || !response.ok) {
-            throw new Error(`Failed to fetch .env file: ${response ? response.status : 'No response'}`);
-        }
-        
-        text = await response.text();
-        
-        // If the response is empty or not valid, use hard-coded fallback
-        if (!text || text.trim().length === 0) {
-            logAction('Received empty .env file, using fallbacks', {});
-            throw new Error('Empty .env file received');
-        }
-        
-        const config = {};
-        
-        // Parse the .env format (key=value pairs, one per line)
-        text.split('\n').forEach(line => {
-            // Skip empty lines and comments
-            if (!line || line.startsWith('#')) return;
-            
-            const [key, ...valueParts] = line.split('=');
-            // Handle values that might contain = signs
-            const value = valueParts.join('=');
-            
-            if (key && value) {
-                config[key.trim()] = value.trim();
-            }
-        });
-        
-        // Check if we got essential configuration
-        if (!config.NOTION_API_KEY || !config.NOTION_DATABASE_ID) {
-            logAction('Missing essential configuration in .env', { 
-                hasApiKey: !!config.NOTION_API_KEY,
-                hasDatabaseId: !!config.NOTION_DATABASE_ID
-            });
-        }
-        
-        notionConfig = config;
-        logAction('Env config loaded', { keys: Object.keys(config) });
-        return config;
+        appConfig = await response.json();
+        logAction('App config loaded', { keys: Object.keys(appConfig) });
+        return appConfig;
     } catch (error) {
-        logAction('Error loading .env file', { error: error.message });
+        logAction('Error loading app config', { error: error.message });
         
-        // Return fallback config
-        notionConfig = {
-            // You can include default test keys here if appropriate
-            // NOTION_API_KEY: 'secret_...',
-            // NOTION_DATABASE_ID: '...',
-            _source: 'fallback'
-        };
-        
-        return notionConfig;
+        // Return empty config as fallback
+        appConfig = { _source: 'fallback' };
+        return appConfig;
     }
 }
 
@@ -116,8 +55,8 @@ async function getNotionClient() {
     }
     
     try {
-        // Get configuration from .env file
-        const config = await parseEnvFile();
+        // Get configuration from server
+        const config = await getAppConfig();
         const apiToken = config.NOTION_API_KEY;
         
         if (!apiToken) {
@@ -601,7 +540,7 @@ async function handleSubmit(event) {
     
     try {
         const notionClient = await getNotionClient();
-        const config = await parseEnvFile();
+        const config = await getAppConfig();
         const databaseId = config.NOTION_DATABASE_ID;
         
         if (notionClient && databaseId) {

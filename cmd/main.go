@@ -7,9 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -119,8 +117,8 @@ func serveStaticFiles() {
 	http.HandleFunc("/notion/mini-app/api/properties", handleProperties)
 	http.HandleFunc("/notion/mini-app/api/log", handleLogs)
 
-	// Serve .env file for client-side configuration
-	http.HandleFunc("/.env", handleEnvFile)
+	// Simple config endpoint that returns environment variables as JSON
+	http.HandleFunc("/notion/mini-app/api/config", handleConfig)
 
 	// Debug endpoints - disable in production
 	http.HandleFunc("/notion/mini-app/api/debug/task", handleDebugTask)
@@ -140,96 +138,60 @@ func serveStaticFiles() {
 	log.Fatal(server.ListenAndServe())
 }
 
-// Handler to serve .env file for client-side configuration
-func handleEnvFile(w http.ResponseWriter, r *http.Request) {
-	// Set content type
-	w.Header().Set("Content-Type", "text/plain")
+// Handler for providing configuration to the frontend
+func handleConfig(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Config endpoint called from: %s", r.RemoteAddr)
+
+	// Set headers
+	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
-	// Log debug info
-	cwd, _ := os.Getwd()
-	log.Printf("Handling .env request. Current working directory: %s", cwd)
+	// Handle preflight OPTIONS request
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 
-	// Check environment (don't expose in production)
+	// Only handle GET requests
+	if r.Method != http.MethodGet {
+		log.Printf("Invalid method %s for config endpoint", r.Method)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check environment (limit what's exposed in production)
 	isProd := os.Getenv("ENVIRONMENT") == "production"
-	if isProd {
-		// In production, return a sanitized version with only safe keys
-		envData := []string{
-			"PORT=" + os.Getenv("PORT"),
-			"HOST=" + os.Getenv("HOST"),
-			"MINI_APP_URL=" + os.Getenv("MINI_APP_URL"),
-		}
-		w.Write([]byte(strings.Join(envData, "\n")))
+
+	// Create config object
+	config := map[string]string{
+		"MINI_APP_URL": os.Getenv("MINI_APP_URL"),
+	}
+
+	// Add sensitive info only in non-production environments
+	if !isProd {
+		notionKey := os.Getenv("NOTION_API_KEY")
+		notionDBID := os.Getenv("NOTION_DATABASE_ID")
+
+		// Log available keys (without exposing their values)
+		log.Printf("Config: NOTION_API_KEY available: %v", notionKey != "")
+		log.Printf("Config: NOTION_DATABASE_ID available: %v", notionDBID != "")
+
+		config["NOTION_API_KEY"] = notionKey
+		config["NOTION_DATABASE_ID"] = notionDBID
+	}
+
+	// Return configuration as JSON
+	jsonData, err := json.Marshal(config)
+	if err != nil {
+		log.Printf("Error encoding config response: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	// Possible file locations to check
-	possiblePaths := []string{
-		".env",                      // Current directory
-		"../.env",                   // Parent directory
-		"/app/.env",                 // Docker container root
-		cwd + "/.env",               // Absolute path to current dir
-		os.Getenv("HOME") + "/.env", // User's home directory
-	}
-
-	// Try to find and read the .env file from possible locations
-	var envBytes []byte
-	var err error
-	var foundPath string
-
-	for _, path := range possiblePaths {
-		log.Printf("Trying to load .env from: %s", path)
-		envBytes, err = os.ReadFile(path)
-		if err == nil {
-			foundPath = path
-			log.Printf("Successfully loaded .env from: %s", path)
-			break
-		}
-	}
-
-	// If found, return the .env file contents
-	if foundPath != "" {
-		w.Write(envBytes)
-		return
-	}
-
-	// If .env file doesn't exist anywhere, log the error and create default values
-	log.Printf("Could not find .env file in any location. Error: %v", err)
-
-	// Generate .env content from environment variables
-	envData := []string{
-		"# Auto-generated .env file",
-		"TELEGRAM_BOT_TOKEN=" + os.Getenv("TELEGRAM_BOT_TOKEN"),
-		"NOTION_API_KEY=" + os.Getenv("NOTION_API_KEY"),
-		"NOTION_DATABASE_ID=" + os.Getenv("NOTION_DATABASE_ID"),
-		"MINI_APP_URL=" + os.Getenv("MINI_APP_URL"),
-		"PORT=" + os.Getenv("PORT"),
-		"HOST=" + os.Getenv("HOST"),
-	}
-
-	envContent := strings.Join(envData, "\n")
-
-	// Try to create a new .env file in the current directory
-	localEnvPath := ".env"
-	writeErr := os.WriteFile(localEnvPath, []byte(envContent), 0644)
-	if writeErr == nil {
-		log.Printf("Created new .env file at %s", localEnvPath)
-	} else {
-		log.Printf("Failed to create .env file: %v", writeErr)
-
-		// Try alternative location
-		altPath := filepath.Join(cwd, ".env")
-		writeErr = os.WriteFile(altPath, []byte(envContent), 0644)
-		if writeErr == nil {
-			log.Printf("Created new .env file at alternative location: %s", altPath)
-		} else {
-			log.Printf("Failed to create .env file at alternative location: %v", writeErr)
-		}
-	}
-
-	// Return the generated content regardless of whether we could save it
-	log.Printf("Returning generated .env content with %d bytes", len(envContent))
-	w.Write([]byte(envContent))
+	log.Printf("Sending config response with %d bytes", len(jsonData))
+	w.Write(jsonData)
 }
 
 type TaskRequest struct {
