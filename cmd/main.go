@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -115,6 +116,7 @@ func serveStaticFiles() {
 	http.HandleFunc("/notion/mini-app/api/tasks", handleTasks)
 	http.HandleFunc("/notion/mini-app/api/properties", handleProperties)
 	http.HandleFunc("/notion/mini-app/api/log", handleLogs)
+	http.HandleFunc("/notion/mini-app/api/notion-credentials", handleNotionCredentials)
 
 	// Debug endpoints - disable in production
 	http.HandleFunc("/notion/mini-app/api/debug/task", handleDebugTask)
@@ -197,13 +199,80 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 	notionClient := notion.NewClient()
 	ctx := context.Background()
 
+	// Get database properties to validate against
+	dbProps, err := notionClient.GetDatabaseProperties(ctx)
+	if err != nil {
+		log.Printf("Warning: Could not fetch database properties: %v", err)
+		// Continue but be more cautious with property handling
+	}
+
 	// Filter properties to only include supported Notion types
 	filteredProperties := make(map[string]interface{})
+
+	// First pass: Convert properties to the correct type and filter out unsupported ones
 	for key, value := range taskReq.Properties {
-		// Skip properties that are not supported by Notion
-		if key == "button" || key == "complete" || key == "status" || key == "done" {
+		// Skip known button properties or potentially problematic properties
+		if key == "button" || key == "complete" || key == "status" || key == "done" || key == "checkbox" {
+			log.Printf("Skipping known button property: %s", key)
 			continue
 		}
+
+		// If we have database properties, check if this property exists in the database
+		if dbProps != nil {
+			if prop, exists := dbProps[key]; exists {
+				propType := prop.GetType()
+				log.Printf("Found property %s with type %s in database", key, propType)
+
+				// Skip button type properties
+				if propType == "button" {
+					log.Printf("Skipping button property from database: %s", key)
+					continue
+				}
+
+				// Process property based on its type in the database
+				switch propType {
+				case "checkbox":
+					// Convert checkbox values to bool
+					boolValue := false
+					switch v := value.(type) {
+					case bool:
+						boolValue = v
+					case string:
+						boolValue = v == "true" || v == "yes" || v == "1"
+					case float64:
+						boolValue = v != 0
+					case int:
+						boolValue = v != 0
+					}
+					filteredProperties[key] = boolValue
+					continue
+
+				case "number":
+					// Try to convert to number if not already
+					switch v := value.(type) {
+					case float64, int:
+						filteredProperties[key] = v
+					case string:
+						// Try to parse as float
+						if parsedFloat, err := strconv.ParseFloat(v, 64); err == nil {
+							filteredProperties[key] = parsedFloat
+						} else {
+							log.Printf("Warning: Could not parse %s as number for property %s, skipping", v, key)
+							continue
+						}
+					default:
+						log.Printf("Warning: Unsupported type for number property %s, skipping", key)
+						continue
+					}
+					continue
+				}
+			} else {
+				log.Printf("Property %s does not exist in database schema, skipping", key)
+				continue
+			}
+		}
+
+		// Include the property in filtered set
 		filteredProperties[key] = value
 	}
 
@@ -222,7 +291,7 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 
 	// Return success
 	w.WriteHeader(http.StatusCreated)
-	err := json.NewEncoder(w).Encode(map[string]string{
+	err = json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
 		"message": "Task created successfully",
 	})
@@ -421,4 +490,57 @@ func handleDebugTask(w http.ResponseWriter, r *http.Request) {
 		"status":  "success",
 		"message": "Debug task created successfully",
 	})
+}
+
+// Handler for providing Notion API credentials to the frontend
+func handleNotionCredentials(w http.ResponseWriter, r *http.Request) {
+	// Set CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Handle preflight OPTIONS request
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Only handle GET requests
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check environment (should not expose these in production!)
+	isProd := os.Getenv("ENVIRONMENT") == "production"
+	if isProd {
+		// In production, don't expose credentials directly to the frontend
+		log.Printf("Refusing to expose Notion credentials in production environment")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "error",
+			"message": "Direct API access is not available in production",
+		})
+		return
+	}
+
+	// Set content type
+	w.Header().Set("Content-Type", "application/json")
+
+	// Get credentials from environment
+	apiToken := os.Getenv("NOTION_API_KEY")
+	dbID := os.Getenv("NOTION_DATABASE_ID")
+
+	// Send response
+	credentials := map[string]string{
+		"token":      apiToken, // For direct client-side API calls
+		"databaseId": dbID,     // Database ID needed for client-side API
+		"status":     "success",
+	}
+
+	if err := json.NewEncoder(w).Encode(credentials); err != nil {
+		log.Printf("Error encoding credentials response: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
 }

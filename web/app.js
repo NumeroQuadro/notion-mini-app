@@ -15,7 +15,45 @@ function logAction(action, data) {
 }
 
 // Known checkbox property names - centralized list
-const CHECKBOX_PROPERTIES = ['complete', 'status', 'done'];
+const CHECKBOX_PROPERTIES = ['complete', 'status', 'done', 'complete'];
+
+// Initialize Notion Client (initialized on demand)
+let notionClient = null;
+
+// Initialize Notion client with authentication
+async function getNotionClient() {
+    // If we already have a client, return it
+    if (notionClient) {
+        return notionClient;
+    }
+    
+    try {
+        // Get authentication token and database ID from server
+        const response = await fetch('/notion/mini-app/api/notion-credentials');
+        
+        if (!response.ok) {
+            throw new Error(`Failed to get Notion credentials: ${response.status}`);
+        }
+        
+        const credentials = await response.json();
+        
+        // Create and return the Notion client
+        if (window.NotionHQClient && credentials.token) {
+            // The UMD build exposes the client constructor as NotionHQClient
+            notionClient = new window.NotionHQClient({ 
+                auth: credentials.token 
+            });
+            logAction('Notion client initialized', { success: true });
+            return notionClient;
+        } else {
+            throw new Error('Notion API or credentials not available');
+        }
+    } catch (error) {
+        logAction('Error initializing Notion client', { error: error.message });
+        // Return null to indicate failure
+        return null;
+    }
+}
 
 // Get database properties from the backend
 async function getDatabaseProperties() {
@@ -67,6 +105,11 @@ async function createPropertyFields() {
 
     // Create fields for each property
     for (const [key, config] of Object.entries(properties)) {
+        // Skip the 'Name' property since we already have a title field
+        if (key === 'Name' || key === 'title' || config.type === 'title') {
+            continue;
+        }
+
         const formGroup = document.createElement('div');
         formGroup.className = 'form-group';
 
@@ -93,7 +136,7 @@ async function createPropertyFields() {
                 const checkboxContainer = document.createElement('div');
                 checkboxContainer.className = 'checkbox-group';
                 
-                if (config.options) {
+                if (config.options && config.options.length > 0) {
                     config.options.forEach(option => {
                         const checkboxDiv = document.createElement('div');
                         
@@ -102,6 +145,7 @@ async function createPropertyFields() {
                         checkbox.id = `${key}-${option}`;
                         checkbox.name = key;
                         checkbox.value = option;
+                        checkbox.dataset.type = 'multi_select';
                         
                         const checkboxLabel = document.createElement('label');
                         checkboxLabel.htmlFor = `${key}-${option}`;
@@ -111,16 +155,24 @@ async function createPropertyFields() {
                         checkboxDiv.appendChild(checkboxLabel);
                         checkboxContainer.appendChild(checkboxDiv);
                     });
+                } else {
+                    // If no options provided, provide a text input with comma separation
+                    const textInput = document.createElement('input');
+                    textInput.type = 'text';
+                    textInput.id = key;
+                    textInput.placeholder = 'Enter comma-separated values';
+                    textInput.dataset.type = 'multi_select_text';
+                    checkboxContainer.appendChild(textInput);
                 }
                 
                 input = checkboxContainer;
                 break;
                 
             case 'select':
-                input = document.createElement('div');
-                input.className = 'radio-group';
-                
-                if (config.options) {
+                if (config.options && config.options.length > 0) {
+                    input = document.createElement('div');
+                    input.className = 'radio-group';
+                    
                     config.options.forEach(option => {
                         const radioDiv = document.createElement('div');
                         
@@ -129,6 +181,7 @@ async function createPropertyFields() {
                         radio.id = `${key}-${option}`;
                         radio.name = key;
                         radio.value = option;
+                        radio.dataset.type = 'select';
                         
                         const radioLabel = document.createElement('label');
                         radioLabel.htmlFor = `${key}-${option}`;
@@ -138,25 +191,75 @@ async function createPropertyFields() {
                         radioDiv.appendChild(radioLabel);
                         input.appendChild(radioDiv);
                     });
+                } else {
+                    // Fallback to a select dropdown
+                    input = document.createElement('select');
+                    input.id = key;
+                    input.name = key;
+                    input.dataset.type = 'select';
+                    
+                    // Add an empty option
+                    const emptyOption = document.createElement('option');
+                    emptyOption.value = '';
+                    emptyOption.textContent = '-- Select --';
+                    input.appendChild(emptyOption);
                 }
+                break;
+
+            case 'checkbox':
+                input = document.createElement('input');
+                input.type = 'checkbox';
+                input.id = key;
+                input.name = key;
+                input.value = 'true';
+                input.dataset.type = 'checkbox';
                 break;
                 
             case 'date':
                 input = document.createElement('input');
                 input.type = 'date';
+                input.id = key;
+                input.dataset.type = 'date';
                 break;
-                
-            case 'title':
-                // Title is handled separately as taskTitle
-                continue;
+
+            case 'url':
+                input = document.createElement('input');
+                input.type = 'url'; 
+                input.id = key;
+                input.placeholder = 'https://';
+                input.dataset.type = 'url';
+                break;
+
+            case 'email':
+                input = document.createElement('input');
+                input.type = 'email';
+                input.id = key;
+                input.dataset.type = 'email';
+                break;
+
+            case 'phone_number':
+                input = document.createElement('input');
+                input.type = 'tel';
+                input.id = key;
+                input.dataset.type = 'phone_number';
+                break;
+
+            case 'number':
+                input = document.createElement('input');
+                input.type = 'number';
+                input.id = key;
+                input.dataset.type = 'number';
+                break;
                 
             default:
                 input = document.createElement('input');
                 input.type = 'text';
+                input.id = key;
+                input.dataset.type = 'text';
         }
 
-        input.id = key;
         input.required = config.required || false;
+        input.dataset.propName = key;
 
         formGroup.appendChild(label);
         formGroup.appendChild(input);
@@ -197,6 +300,104 @@ function formatDateForNotion(dateStr) {
         console.error("Error formatting date:", e);
         return dateStr; // Return original if parsing fails
     }
+}
+
+// Convert form data to Notion properties structure
+function convertToNotionProperties(formData) {
+    const properties = {
+        "Name": {
+            title: [
+                {
+                    text: {
+                        content: formData.title
+                    }
+                }
+            ]
+        }
+    };
+    
+    // Process each property based on its type
+    Object.entries(formData.properties).forEach(([key, value]) => {
+        // Skip empty values
+        if (value === undefined || value === null || value === '') {
+            return;
+        }
+        
+        // Get property type from the form element
+        const formElement = document.querySelector(`[data-prop-name="${key}"]`);
+        if (!formElement) return;
+        
+        const propType = formElement.dataset.type;
+        
+        switch (propType) {
+            case 'multi_select':
+            case 'multi_select_text':
+                // Handle array of values for multi-select
+                const options = Array.isArray(value) ? value : [value];
+                properties[key] = {
+                    multi_select: options.map(opt => ({ name: opt }))
+                };
+                break;
+                
+            case 'select':
+                properties[key] = {
+                    select: { name: value }
+                };
+                break;
+                
+            case 'checkbox':
+                properties[key] = {
+                    checkbox: value === true || value === 'true' || value === 'yes' || value === '1'
+                };
+                break;
+                
+            case 'date':
+                properties[key] = {
+                    date: {
+                        start: formatDateForNotion(value)
+                    }
+                };
+                break;
+                
+            case 'number':
+                properties[key] = {
+                    number: parseFloat(value)
+                };
+                break;
+                
+            case 'url':
+                properties[key] = {
+                    url: value
+                };
+                break;
+                
+            case 'email':
+                properties[key] = {
+                    email: value
+                };
+                break;
+                
+            case 'phone_number':
+                properties[key] = {
+                    phone_number: value
+                };
+                break;
+                
+            default:
+                // Default to rich text
+                properties[key] = {
+                    rich_text: [
+                        {
+                            text: {
+                                content: value
+                            }
+                        }
+                    ]
+                };
+        }
+    });
+    
+    return properties;
 }
 
 // Handle form submission
@@ -259,10 +460,14 @@ async function handleSubmit(event) {
             if (element.checked) {
                 // For multi-select, add to array if not exists
                 const name = element.name;
-                if (!taskData.properties[name]) {
-                    taskData.properties[name] = [];
+                if (name !== element.id) { // multi-select checkbox
+                    if (!taskData.properties[name]) {
+                        taskData.properties[name] = [];
+                    }
+                    taskData.properties[name].push(element.value);
+                } else { // regular checkbox
+                    taskData.properties[element.id] = true;
                 }
-                taskData.properties[name].push(element.value);
             }
         } else if (element.type === 'radio') {
             if (element.checked) {
@@ -279,39 +484,19 @@ async function handleSubmit(event) {
         } else if (element.type === 'button') {
             // Skip actual button elements
             continue;
-        } else {
-            // For other inputs
+        } else if (element.tagName === 'SELECT') {
+            // For dropdowns
             if (element.value) {
                 taskData.properties[element.id] = element.value;
             }
-        }
-        
-        // Handle different input types
-        if (element.type === 'checkbox') {
-            if (element.checked) {
-                // For multi-select, add to array if not exists
-                const name = element.name;
-                if (!taskData.properties[name]) {
-                    taskData.properties[name] = [];
-                }
-                taskData.properties[name].push(element.value);
-            }
-        } else if (element.type === 'radio') {
-            if (element.checked) {
-                taskData.properties[element.name] = element.value;
-            }
-        } else if (element.type === 'date') {
-            // Format date fields properly
+        } else if (element.dataset.type === 'multi_select_text') {
+            // Handle the text input for multi-select
             if (element.value) {
-                taskData.properties[element.id] = formatDateForNotion(element.value);
+                const values = element.value.split(',').map(v => v.trim()).filter(v => v);
+                if (values.length > 0) {
+                    taskData.properties[element.id] = values;
+                }
             }
-        } else if (element.tagName === 'DIV') {
-            // Skip container divs
-            continue;
-        } else if (element.type === 'button') {
-            // Skip actual button elements
-            logAction('Skipping button element', { id: element.id });
-            continue;
         } else {
             // For other inputs
             if (element.value) {
@@ -320,9 +505,54 @@ async function handleSubmit(event) {
         }
     }
 
-    logAction('Sending task data', taskData);
+    logAction('Task data collected', taskData);
+
+    // Try to use direct Notion API if available
+    let useDirectAPI = false;
+    
+    try {
+        const notionClient = await getNotionClient();
+        if (notionClient) {
+            useDirectAPI = true;
+            logAction('Using direct Notion API', {});
+            
+            // Get database ID
+            const dbResponse = await fetch('/notion/mini-app/api/notion-credentials');
+            const { databaseId } = await dbResponse.json();
+            
+            if (!databaseId) {
+                throw new Error('Database ID not available');
+            }
+            
+            // Convert to Notion properties format
+            const notionProperties = convertToNotionProperties(taskData);
+            
+            // Create page in Notion database
+            const response = await notionClient.pages.create({
+                parent: { database_id: databaseId },
+                properties: notionProperties
+            });
+            
+            logAction('Task created via direct API', { pageId: response.id });
+            showPopup('Success', 'Task created successfully!');
+            
+            // Reset form
+            form.reset();
+            
+            // Re-enable the button
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Create Task';
+            return;
+        }
+    } catch (error) {
+        logAction('Error using direct Notion API', { error: error.message });
+        console.error('Error using direct Notion API:', error);
+        // Fall back to server API
+        useDirectAPI = false;
+    }
 
     try {
+        // Use server API as fallback
         // Use a timeout to handle cases where the server doesn't respond
         const timeoutPromise = new Promise((_, reject) => {
             setTimeout(() => reject(new Error('Request timed out')), 10000);
@@ -356,7 +586,7 @@ async function handleSubmit(event) {
         })();
 
         if (response.ok) {
-            logAction('Task created', { 
+            logAction('Task created via server API', { 
                 status: response.status, 
                 data: responseData.data 
             });
@@ -364,9 +594,7 @@ async function handleSubmit(event) {
             showPopup('Success', 'Task created successfully!');
             
             // Reset form
-            document.getElementById('taskForm').reset();
-            
-            // Don't try to close the mini app as it's not reliable
+            form.reset();
         } else {
             const errorMsg = responseData.type === 'json' 
                 ? (responseData.data.message || JSON.stringify(responseData.data))

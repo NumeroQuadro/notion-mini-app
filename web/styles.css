@@ -39,7 +39,12 @@ label {
 
 input[type="text"],
 input[type="date"],
-select {
+input[type="email"],
+input[type="url"],
+input[type="tel"],
+input[type="number"],
+select,
+textarea {
     width: 100%;
     padding: 12px;
     border: 1px solid var(--tg-theme-hint-color);
@@ -47,6 +52,30 @@ select {
     background-color: var(--tg-theme-bg-color);
     color: var(--tg-theme-text-color);
     font-size: 16px;
+    box-sizing: border-box;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+    outline: none;
+    border-color: var(--tg-theme-button-color);
+    box-shadow: 0 0 0 2px rgba(36, 129, 204, 0.2);
+}
+
+/* Checkbox styling */
+input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    margin-right: 8px;
+    cursor: pointer;
+    vertical-align: middle;
+}
+
+input[type="checkbox"] + label {
+    display: inline;
+    vertical-align: middle;
+    color: var(--tg-theme-text-color);
 }
 
 /* Checkbox and radio styles */
@@ -80,6 +109,22 @@ select {
     color: var(--tg-theme-text-color);
 }
 
+/* Placeholder styling */
+::placeholder {
+    color: var(--tg-theme-hint-color);
+    opacity: 0.7;
+}
+
+:-ms-input-placeholder {
+    color: var(--tg-theme-hint-color);
+    opacity: 0.7;
+}
+
+::-ms-input-placeholder {
+    color: var(--tg-theme-hint-color);
+    opacity: 0.7;
+}
+
 .submit-btn {
     width: 100%;
     padding: 12px;
@@ -88,16 +133,19 @@ select {
     border: none;
     border-radius: 8px;
     font-size: 16px;
+    font-weight: 500;
     cursor: pointer;
-    transition: opacity 0.2s;
+    transition: all 0.2s ease;
 }
 
 .submit-btn:hover {
     opacity: 0.9;
+    transform: translateY(-1px);
 }
 
 .submit-btn:active {
     opacity: 0.8;
+    transform: translateY(1px);
 }
 
 .error-message {
@@ -114,4 +162,22 @@ select {
     background-color: #cccccc;
     cursor: not-allowed;
     opacity: 0.7;
+    transform: none;
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+    input, select, textarea {
+        background-color: rgba(255, 255, 255, 0.05);
+        border-color: rgba(255, 255, 255, 0.1);
+    }
+    
+    input:focus, select:focus, textarea:focus {
+        border-color: var(--tg-theme-button-color);
+        box-shadow: 0 0 0 2px rgba(36, 129, 204, 0.3);
+    }
+    
+    .error-message {
+        background-color: rgba(204, 0, 0, 0.1);
+    }
 } 

@@ -112,6 +112,37 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 					log.Printf("Skipping button property: %s", key)
 					continue
 				}
+
+				// Handle property based on its type in the database
+				switch propType {
+				case "multi_select":
+					c.handleMultiSelectProperty(page, key, value)
+					continue
+				case "select":
+					c.handleSelectProperty(page, key, value)
+					continue
+				case "date":
+					c.handleDateProperty(page, key, value)
+					continue
+				case "checkbox":
+					c.handleCheckboxProperty(page, key, value)
+					continue
+				case "rich_text":
+					c.handleTextProperty(page, key, value)
+					continue
+				case "number":
+					c.handleNumberProperty(page, key, value)
+					continue
+				case "url":
+					c.handleURLProperty(page, key, value)
+					continue
+				case "email":
+					c.handleEmailProperty(page, key, value)
+					continue
+				case "phone_number":
+					c.handlePhoneProperty(page, key, value)
+					continue
+				}
 			} else {
 				// Property doesn't exist in database schema
 				log.Printf("Property %s does not exist in database schema, skipping", key)
@@ -119,70 +150,20 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 			}
 		}
 
+		// Fallback logic for when we couldn't determine property type or don't have schema
 		switch key {
 		case "Tags":
-			// Handle multi-select property
-			if tags, ok := value.([]interface{}); ok {
-				var options []notionapi.Option
-				for _, tag := range tags {
-					if tagStr, ok := tag.(string); ok {
-						options = append(options, notionapi.Option{
-							Name: tagStr,
-						})
-					}
-				}
-				page.Properties[key] = notionapi.MultiSelectProperty{
-					MultiSelect: options,
-				}
-			} else if tagStr, ok := value.(string); ok {
-				// Handle single string
-				page.Properties[key] = notionapi.MultiSelectProperty{
-					MultiSelect: []notionapi.Option{
-						{Name: tagStr},
-					},
-				}
-			}
+			c.handleMultiSelectProperty(page, key, value)
 
 		case "project":
-			// Handle select property
-			if projectStr, ok := value.(string); ok {
-				page.Properties[key] = notionapi.SelectProperty{
-					Select: notionapi.Option{
-						Name: projectStr,
-					},
-				}
-			}
+			c.handleSelectProperty(page, key, value)
 
 		case "Date":
-			// Handle date property correctly using Notion's DateProperty
-			if dateStr, ok := value.(string); ok && dateStr != "" {
-				// Parse and convert to Notion's Date type
-				parsedDate := parseToNotionDate(dateStr)
-
-				// Create a DateProperty with the proper structure required by Notion
-				page.Properties[key] = notionapi.DateProperty{
-					Date: &notionapi.DateObject{
-						Start: parsedDate,
-						End:   nil, // End date is optional and can be nil
-					},
-				}
-
-				log.Printf("Added Date property: %s", parsedDate.String())
-			}
+			c.handleDateProperty(page, key, value)
 
 		default:
 			// Handle text properties as default
-			if valueStr, ok := value.(string); ok {
-				page.Properties[key] = notionapi.RichTextProperty{
-					RichText: []notionapi.RichText{
-						{
-							Text: &notionapi.Text{
-								Content: valueStr,
-							},
-						},
-					},
-				}
-			}
+			c.handleTextProperty(page, key, value)
 		}
 	}
 
@@ -220,6 +201,140 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 
 	log.Printf("Task created successfully with ID: %s", createdPage.ID)
 	return nil
+}
+
+// Helper methods for handling different property types
+
+func (c *Client) handleMultiSelectProperty(page *notionapi.PageCreateRequest, key string, value interface{}) {
+	if tags, ok := value.([]interface{}); ok {
+		var options []notionapi.Option
+		for _, tag := range tags {
+			if tagStr, ok := tag.(string); ok {
+				options = append(options, notionapi.Option{
+					Name: tagStr,
+				})
+			}
+		}
+		page.Properties[key] = notionapi.MultiSelectProperty{
+			MultiSelect: options,
+		}
+	} else if tagStr, ok := value.(string); ok {
+		// Handle single string
+		page.Properties[key] = notionapi.MultiSelectProperty{
+			MultiSelect: []notionapi.Option{
+				{Name: tagStr},
+			},
+		}
+	}
+}
+
+func (c *Client) handleSelectProperty(page *notionapi.PageCreateRequest, key string, value interface{}) {
+	if projectStr, ok := value.(string); ok {
+		page.Properties[key] = notionapi.SelectProperty{
+			Select: notionapi.Option{
+				Name: projectStr,
+			},
+		}
+	}
+}
+
+func (c *Client) handleDateProperty(page *notionapi.PageCreateRequest, key string, value interface{}) {
+	if dateStr, ok := value.(string); ok && dateStr != "" {
+		// Parse and convert to Notion's Date type
+		parsedDate := parseToNotionDate(dateStr)
+
+		// Create a DateProperty with the proper structure required by Notion
+		page.Properties[key] = notionapi.DateProperty{
+			Date: &notionapi.DateObject{
+				Start: parsedDate,
+				End:   nil, // End date is optional and can be nil
+			},
+		}
+
+		log.Printf("Added Date property: %s", parsedDate.String())
+	}
+}
+
+func (c *Client) handleCheckboxProperty(page *notionapi.PageCreateRequest, key string, value interface{}) {
+	var checked bool
+	switch v := value.(type) {
+	case bool:
+		checked = v
+	case string:
+		checked = v == "true" || v == "yes" || v == "1"
+	case float64:
+		checked = v != 0
+	case int:
+		checked = v != 0
+	default:
+		checked = false
+	}
+	page.Properties[key] = notionapi.CheckboxProperty{
+		Checkbox: checked,
+	}
+}
+
+func (c *Client) handleTextProperty(page *notionapi.PageCreateRequest, key string, value interface{}) {
+	if valueStr, ok := value.(string); ok {
+		page.Properties[key] = notionapi.RichTextProperty{
+			RichText: []notionapi.RichText{
+				{
+					Text: &notionapi.Text{
+						Content: valueStr,
+					},
+				},
+			},
+		}
+	}
+}
+
+func (c *Client) handleNumberProperty(page *notionapi.PageCreateRequest, key string, value interface{}) {
+	var number float64
+	switch v := value.(type) {
+	case float64:
+		number = v
+	case int:
+		number = float64(v)
+	case string:
+		// Try to parse the string as a number
+		var parsed float64
+		if _, err := fmt.Sscanf(v, "%f", &parsed); err == nil {
+			number = parsed
+		} else {
+			log.Printf("Could not parse string '%s' as number, skipping property %s", v, key)
+			return
+		}
+	default:
+		log.Printf("Unsupported type for number property %s, skipping", key)
+		return
+	}
+	page.Properties[key] = notionapi.NumberProperty{
+		Number: number,
+	}
+}
+
+func (c *Client) handleURLProperty(page *notionapi.PageCreateRequest, key string, value interface{}) {
+	if urlStr, ok := value.(string); ok {
+		page.Properties[key] = notionapi.URLProperty{
+			URL: urlStr,
+		}
+	}
+}
+
+func (c *Client) handleEmailProperty(page *notionapi.PageCreateRequest, key string, value interface{}) {
+	if emailStr, ok := value.(string); ok {
+		page.Properties[key] = notionapi.EmailProperty{
+			Email: emailStr,
+		}
+	}
+}
+
+func (c *Client) handlePhoneProperty(page *notionapi.PageCreateRequest, key string, value interface{}) {
+	if phoneStr, ok := value.(string); ok {
+		page.Properties[key] = notionapi.PhoneNumberProperty{
+			PhoneNumber: phoneStr,
+		}
+	}
 }
 
 func (c *Client) GetDatabaseProperties(ctx context.Context) (map[string]notionapi.PropertyConfig, error) {
