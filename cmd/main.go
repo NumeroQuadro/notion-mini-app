@@ -24,13 +24,13 @@ func main() {
 
 	// Run debug mode if requested
 	if *debugMode {
-		runDebugMode()
+		log.Println("Debug mode not yet implemented - run 'go run cmd/debug.go' separately")
 		return
 	}
 
 	// Run debug task mode if requested
 	if *debugTaskMode {
-		debugTaskCreation()
+		log.Println("Debug task mode not yet implemented - run 'go run cmd/debug-task.go' separately")
 		return
 	}
 
