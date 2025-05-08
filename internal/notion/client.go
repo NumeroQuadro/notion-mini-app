@@ -84,12 +84,14 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 		case "Date":
 			// Handle date property
 			if dateStr, ok := value.(string); ok && dateStr != "" {
-				// For date property, just use the string representation
-				// The Notion API will parse it correctly
-				page.Properties[key] = &notionapi.DateProperty{
-					Type: "date",
-					Date: &notionapi.DateObject{
-						Start: &dateStr,
+				// Skip the complex Date object for now, use a simple text property
+				page.Properties[key] = notionapi.RichTextProperty{
+					RichText: []notionapi.RichText{
+						{
+							Text: &notionapi.Text{
+								Content: dateStr,
+							},
+						},
 					},
 				}
 			}
