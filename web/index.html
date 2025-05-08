@@ -10,6 +10,7 @@
 <body>
     <div class="container">
         <h1>Create New Task</h1>
+        <div id="error-container" class="error-message" style="display: none;"></div>
         <form id="taskForm">
             <div class="form-group">
                 <label for="taskTitle">Task Title</label>
@@ -20,7 +21,7 @@
                 <!-- Dynamic properties will be added here -->
             </div>
 
-            <button type="submit" class="submit-btn">Create Task</button>
+            <button type="submit" class="submit-btn" id="submitBtn">Create Task</button>
         </form>
     </div>
     <script src="app.js"></script>

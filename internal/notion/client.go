@@ -2,6 +2,7 @@ package notion
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 
@@ -23,6 +24,10 @@ func NewClient() *Client {
 
 func (c *Client) CreateTask(ctx context.Context, title string, properties map[string]interface{}) error {
 	log.Printf("Creating task: %s with properties: %v", title, properties)
+
+	if title == "" {
+		return fmt.Errorf("task title cannot be empty")
+	}
 
 	// Create the base request with title property
 	page := &notionapi.PageCreateRequest{
@@ -115,8 +120,8 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 	// Create the page in Notion
 	createdPage, err := c.client.Page.Create(ctx, page)
 	if err != nil {
-		log.Printf("Error creating task: %v", err)
-		return err
+		log.Printf("Error creating task in Notion: %v", err)
+		return fmt.Errorf("Notion API error: %w", err)
 	}
 
 	log.Printf("Task created successfully with ID: %s", createdPage.ID)

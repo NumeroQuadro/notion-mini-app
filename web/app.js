@@ -159,7 +159,21 @@ function showPopup(title, message) {
     } catch (e) {
         // Fallback to alert if showPopup is not supported
         console.log("showPopup not supported, using alert instead:", e);
-        alert(title + ": " + message);
+        
+        // Show the error in the UI as well
+        const errorContainer = document.getElementById('error-container');
+        if (errorContainer) {
+            errorContainer.textContent = `${title}: ${message}`;
+            errorContainer.style.display = 'block';
+            
+            // Hide after 5 seconds
+            setTimeout(() => {
+                errorContainer.style.display = 'none';
+            }, 5000);
+        } else {
+            // Fallback to alert if error container not found
+            alert(title + ": " + message);
+        }
     }
 }
 
@@ -167,6 +181,17 @@ function showPopup(title, message) {
 async function handleSubmit(event) {
     event.preventDefault();
     logAction('Form submitted', { formId: event.target.id });
+
+    // Get submit button and disable it
+    const submitBtn = document.getElementById('submitBtn');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Creating Task...';
+    
+    // Hide any previous errors
+    const errorContainer = document.getElementById('error-container');
+    if (errorContainer) {
+        errorContainer.style.display = 'none';
+    }
 
     // Create task data object
     const taskData = {
@@ -177,6 +202,10 @@ async function handleSubmit(event) {
     // Validate title
     if (!taskData.title) {
         showPopup('Error', 'Task title is required');
+        
+        // Reset button
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Create Task';
         return;
     }
 
@@ -227,18 +256,30 @@ async function handleSubmit(event) {
             body: JSON.stringify(taskData),
         });
 
-        let resultText = '';
-        try {
-            const resultJson = await response.json();
-            resultText = resultJson.message || JSON.stringify(resultJson);
-        } catch (e) {
-            resultText = await response.text();
-        }
+        // Handle the response
+        const responseData = await (async () => {
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                try {
+                    return { type: 'json', data: await response.json() };
+                } catch (e) {
+                    return { type: 'text', data: await response.text() };
+                }
+            } else {
+                return { type: 'text', data: await response.text() };
+            }
+        })();
 
         if (response.ok) {
-            logAction('Task created', { status: response.status, text: resultText });
+            logAction('Task created', { 
+                status: response.status, 
+                data: responseData.data 
+            });
             
             showPopup('Success', 'Task created successfully!');
+            
+            // Reset form
+            document.getElementById('taskForm').reset();
             
             // Optional: close the mini app after successful submission
             setTimeout(() => {
@@ -250,13 +291,20 @@ async function handleSubmit(event) {
                 }
             }, 1500);
         } else {
-            throw new Error(`Server responded with ${response.status}: ${resultText}`);
+            const errorMsg = responseData.type === 'json' 
+                ? (responseData.data.message || JSON.stringify(responseData.data))
+                : responseData.data;
+            throw new Error(`Server responded with ${response.status}: ${errorMsg}`);
         }
     } catch (error) {
         console.error('Error creating task:', error);
         logAction('Error creating task', { error: error.message });
         
         showPopup('Error', `Failed to create task: ${error.message}`);
+    } finally {
+        // Re-enable the button in all cases
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Create Task';
     }
 }
 

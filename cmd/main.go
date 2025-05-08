@@ -126,6 +126,16 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Content-Type", "application/json")
+
+	// Helper to return JSON error responses
+	sendJSONError := func(statusCode int, message string) {
+		w.WriteHeader(statusCode)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "error",
+			"message": message,
+		})
+	}
 
 	// Handle preflight OPTIONS request
 	if r.Method == http.MethodOptions {
@@ -135,7 +145,7 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 
 	// Only handle POST requests for task creation
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		sendJSONError(http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -143,7 +153,7 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 	var taskReq TaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&taskReq); err != nil {
 		log.Printf("Error decoding task request: %v", err)
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		sendJSONError(http.StatusBadRequest, "Invalid request body: "+err.Error())
 		return
 	}
 
@@ -152,7 +162,7 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 	// Validate request
 	if taskReq.Title == "" {
 		log.Printf("Missing task title")
-		http.Error(w, "Task title is required", http.StatusBadRequest)
+		sendJSONError(http.StatusBadRequest, "Task title is required")
 		return
 	}
 
@@ -161,12 +171,11 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	if err := notionClient.CreateTask(ctx, taskReq.Title, taskReq.Properties); err != nil {
 		log.Printf("Error creating task in Notion: %v", err)
-		http.Error(w, "Failed to create task: "+err.Error(), http.StatusInternalServerError)
+		sendJSONError(http.StatusInternalServerError, "Failed to create task: "+err.Error())
 		return
 	}
 
 	// Return success
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
