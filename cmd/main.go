@@ -245,35 +245,49 @@ func handleProperties(w http.ResponseWriter, r *http.Request) {
 				"type": propType,
 			}
 
+			// Special handling for button properties (which may not be properly supported)
+			if name == "complete" || name == "status" {
+				// If this is a property that might be a button type
+				if propType == "button" || propType == "" {
+					propInfo["type"] = "button"
+					simplifiedProps[name] = propInfo
+					continue
+				}
+			}
+
 			// Add more specific info based on property type
 			switch propType {
 			case "multi_select":
 				if multiSelect, ok := prop.(*notionapi.MultiSelectPropertyConfig); ok {
-					options := make([]string, 0)
-					for _, opt := range multiSelect.MultiSelect.Options {
-						options = append(options, opt.Name)
+					var options []string
+					for _, option := range multiSelect.MultiSelect.Options {
+						options = append(options, option.Name)
 					}
 					propInfo["options"] = options
 				}
 			case "select":
-				if selectProp, ok := prop.(*notionapi.SelectPropertyConfig); ok {
-					options := make([]string, 0)
-					for _, opt := range selectProp.Select.Options {
-						options = append(options, opt.Name)
+				if sel, ok := prop.(*notionapi.SelectPropertyConfig); ok {
+					var options []string
+					for _, option := range sel.Select.Options {
+						options = append(options, option.Name)
 					}
 					propInfo["options"] = options
 				}
+			case "title":
+				propInfo["required"] = true
+			case "button":
+				// Handle button properties - no additional info needed
+				propInfo["type"] = "button"
 			}
 
 			simplifiedProps[name] = propInfo
 		}
 	}
 
-	// Return the properties
-	log.Printf("Returning %d properties", len(simplifiedProps))
 	if err := json.NewEncoder(w).Encode(simplifiedProps); err != nil {
 		log.Printf("Error encoding properties response: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
 	}
 }
 

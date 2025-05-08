@@ -49,9 +49,35 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 		},
 	}
 
+	// Get database properties to identify property types
+	ctx2, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	dbProps, err := c.GetDatabaseProperties(ctx2)
+	if err != nil {
+		log.Printf("Warning: Could not fetch database properties: %v", err)
+		// Continue anyway, we'll try to handle properties based on values
+	} else {
+		log.Printf("Database has %d properties", len(dbProps))
+	}
+
 	// Add custom properties
 	for key, value := range properties {
 		log.Printf("Processing property: %s = %v", key, value)
+
+		// Skip button properties as they can't be set via the API
+		if prop, ok := dbProps[key]; ok && prop.GetType() == "button" {
+			log.Printf("Skipping button property: %s", key)
+			continue
+		}
+
+		// Check if property is named "complete" or "status" - these are often button types
+		if key == "complete" || key == "status" {
+			// Check the database properties to see if this is a button type
+			if prop, ok := dbProps[key]; ok && prop.GetType() == "button" {
+				log.Printf("Skipping button property: %s", key)
+				continue
+			}
+		}
 
 		switch key {
 		case "Tags":

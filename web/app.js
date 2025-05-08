@@ -27,6 +27,15 @@ async function getDatabaseProperties() {
         
         const properties = await response.json();
         logAction('Properties fetched', properties);
+        
+        // Handle button properties specially
+        if (properties.complete && !properties.complete.type) {
+            properties.complete.type = 'button';
+        }
+        if (properties.status && !properties.status.type) {
+            properties.status.type = 'button';
+        }
+        
         return properties;
     } catch (error) {
         console.error('Error fetching properties:', error);
@@ -65,6 +74,12 @@ async function createPropertyFields() {
             required.textContent = ' *';
             required.style.color = 'red';
             label.appendChild(required);
+        }
+
+        // Skip creating input fields for button properties
+        if (config.type === 'button') {
+            logAction('Skipping button property in form', { key });
+            continue;
         }
 
         let input;
@@ -233,6 +248,13 @@ async function handleSubmit(event) {
             continue;
         }
         
+        // Skip button properties - they should not be sent to the server
+        if (element.id === 'complete' || element.id === 'status') {
+            // Button properties are typically named 'complete' or 'status'
+            logAction('Skipping possible button property', { id: element.id });
+            continue;
+        }
+        
         // Handle different input types
         if (element.type === 'checkbox') {
             if (element.checked) {
@@ -254,6 +276,10 @@ async function handleSubmit(event) {
             }
         } else if (element.tagName === 'DIV') {
             // Skip container divs
+            continue;
+        } else if (element.type === 'button') {
+            // Skip actual button elements
+            logAction('Skipping button element', { id: element.id });
             continue;
         } else {
             // For other inputs
