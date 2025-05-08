@@ -168,31 +168,23 @@ async function createPropertyFields() {
 
 // Helper function for showing popups with fallback
 function showPopup(title, message) {
-    try {
-        // Try to use Telegram's native popup
-        tg.showPopup({
-            title: title,
-            message: message,
-            buttons: [{ type: 'ok' }]
-        });
-    } catch (e) {
-        // Fallback to alert if showPopup is not supported
-        console.log("showPopup not supported, using alert instead:", e);
+    // Don't try to use Telegram's native popup as it's not supported
+    // Just use alert directly
+    console.log(`${title}: ${message}`);
+    
+    // Show the error in the UI
+    const errorContainer = document.getElementById('error-container');
+    if (errorContainer) {
+        errorContainer.textContent = `${title}: ${message}`;
+        errorContainer.style.display = 'block';
         
-        // Show the error in the UI as well
-        const errorContainer = document.getElementById('error-container');
-        if (errorContainer) {
-            errorContainer.textContent = `${title}: ${message}`;
-            errorContainer.style.display = 'block';
-            
-            // Hide after 5 seconds
-            setTimeout(() => {
-                errorContainer.style.display = 'none';
-            }, 5000);
-        } else {
-            // Fallback to alert if error container not found
-            alert(title + ": " + message);
-        }
+        // Hide after 5 seconds
+        setTimeout(() => {
+            errorContainer.style.display = 'none';
+        }, 5000);
+    } else {
+        // Fallback to alert if error container not found
+        alert(title + ": " + message);
     }
 }
 
@@ -313,25 +305,35 @@ async function handleSubmit(event) {
     logAction('Sending task data', taskData);
 
     try {
-        const response = await fetch('/notion/mini-app/api/tasks', {
+        // Use a timeout to handle cases where the server doesn't respond
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Request timed out')), 10000);
+        });
+        
+        // Actual fetch request
+        const fetchPromise = fetch('/notion/mini-app/api/tasks', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify(taskData),
         });
+        
+        // Race the fetch against timeout
+        const response = await Promise.race([fetchPromise, timeoutPromise]);
 
         // Handle the response
         const responseData = await (async () => {
-            const contentType = response.headers.get('content-type');
-            if (contentType && contentType.includes('application/json')) {
-                try {
+            try {
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
                     return { type: 'json', data: await response.json() };
-                } catch (e) {
+                } else {
                     return { type: 'text', data: await response.text() };
                 }
-            } else {
-                return { type: 'text', data: await response.text() };
+            } catch (err) {
+                console.error('Error parsing response:', err);
+                return { type: 'error', data: 'Could not parse server response' };
             }
         })();
 
@@ -346,15 +348,7 @@ async function handleSubmit(event) {
             // Reset form
             document.getElementById('taskForm').reset();
             
-            // Optional: close the mini app after successful submission
-            setTimeout(() => {
-                try {
-                    tg.close();
-                } catch (e) {
-                    console.log("tg.close() not supported:", e);
-                    // Just continue if close is not supported
-                }
-            }, 1500);
+            // Don't try to close the mini app as it's not reliable
         } else {
             const errorMsg = responseData.type === 'json' 
                 ? (responseData.data.message || JSON.stringify(responseData.data))

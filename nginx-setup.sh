@@ -78,7 +78,7 @@ http {
             index index.html;
         }
         
-        # Notion mini app location
+        # Notion mini app location - static files
         location /notion/mini-app/ {
             proxy_pass http://localhost:$APP_PORT/notion/mini-app/;
             proxy_set_header Host \$host;
@@ -86,6 +86,22 @@ http {
             proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto \$scheme;
             proxy_redirect off;
+        }
+        
+        # Notion mini app API endpoints - need higher timeouts
+        location /notion/mini-app/api/ {
+            proxy_pass http://localhost:$APP_PORT/notion/mini-app/api/;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+            proxy_redirect off;
+            
+            # Increase timeouts for API calls
+            proxy_connect_timeout 60s;
+            proxy_send_timeout 60s;
+            proxy_read_timeout 60s;
+            send_timeout 60s;
         }
     }
 }

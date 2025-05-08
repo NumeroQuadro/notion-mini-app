@@ -17,10 +17,23 @@ type Client struct {
 }
 
 func NewClient() *Client {
-	client := notionapi.NewClient(notionapi.Token(os.Getenv("NOTION_API_KEY")))
+	apiToken := os.Getenv("NOTION_API_KEY")
+	dbID := os.Getenv("NOTION_DATABASE_ID")
+
+	if apiToken == "" {
+		log.Printf("WARNING: NOTION_API_KEY environment variable is not set")
+	}
+
+	if dbID == "" {
+		log.Printf("WARNING: NOTION_DATABASE_ID environment variable is not set")
+	}
+
+	// Create standard Notion client
+	client := notionapi.NewClient(notionapi.Token(apiToken))
+
 	return &Client{
 		client: client,
-		dbID:   os.Getenv("NOTION_DATABASE_ID"),
+		dbID:   dbID,
 	}
 }
 
@@ -29,6 +42,18 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 
 	if title == "" {
 		return fmt.Errorf("task title cannot be empty")
+	}
+
+	// Check if context has a deadline (timeout)
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		log.Printf("Context has deadline, %v remaining", remaining)
+	} else {
+		// If no timeout set, add one to prevent hanging
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		log.Printf("Added 30s timeout to context")
 	}
 
 	// Get database properties to check for button types
@@ -71,7 +96,7 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 		log.Printf("Processing property: %s = %v", key, value)
 
 		// Skip known button properties or properties that might be buttons
-		if key == "complete" || key == "status" || key == "done" || key == "button" {
+		if key == "complete" || key == "status" || key == "done" || key == "button" || key == "checkbox" {
 			log.Printf("Skipping known button property: %s", key)
 			continue
 		}
@@ -161,10 +186,22 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 		}
 	}
 
+	log.Printf("Sending create page request to Notion API")
+	creationStart := time.Now()
+
 	// Create the page in Notion
 	createdPage, err := c.client.Page.Create(ctx, page)
+
+	elapsedTime := time.Since(creationStart)
+	log.Printf("Notion API request took %v", elapsedTime)
+
 	if err != nil {
 		log.Printf("Error creating task in Notion: %v", err)
+
+		// Check for context deadline exceeded
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("request to Notion API timed out after %v", elapsedTime)
+		}
 
 		// Check if it's a button property error
 		if err.Error() == "unsupported property type: button" {

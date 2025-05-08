@@ -147,21 +147,27 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Handle preflight OPTIONS request
+	if r.Method == http.MethodOptions {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Set content type for all other responses
 	w.Header().Set("Content-Type", "application/json")
 
 	// Helper to return JSON error responses
 	sendJSONError := func(statusCode int, message string) {
 		w.WriteHeader(statusCode)
-		json.NewEncoder(w).Encode(map[string]string{
+		err := json.NewEncoder(w).Encode(map[string]string{
 			"status":  "error",
 			"message": message,
 		})
-	}
-
-	// Handle preflight OPTIONS request
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
-		return
+		if err != nil {
+			log.Printf("Error encoding error response: %v", err)
+		}
 	}
 
 	// Only handle POST requests for task creation
@@ -233,7 +239,10 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 	log.Printf("After filtering: %d properties remaining of %d original properties",
 		len(filteredProperties), len(taskReq.Properties))
 
-	// Create the task in Notion
+	// Create the task in Notion with timeout context
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
 	if err := notionClient.CreateTask(ctx, taskReq.Title, filteredProperties); err != nil {
 		log.Printf("Error creating task in Notion: %v", err)
 		sendJSONError(http.StatusInternalServerError, "Failed to create task: "+err.Error())
@@ -242,10 +251,13 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 
 	// Return success
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{
+	err = json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
 		"message": "Task created successfully",
 	})
+	if err != nil {
+		log.Printf("Error encoding success response: %v", err)
+	}
 }
 
 // API handler for database properties
