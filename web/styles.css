@@ -49,6 +49,37 @@ select {
     font-size: 16px;
 }
 
+/* Checkbox and radio styles */
+.checkbox-group,
+.radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.checkbox-group div,
+.radio-group div {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.checkbox-group input,
+.radio-group input {
+    margin: 0;
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.checkbox-group label,
+.radio-group label {
+    margin: 0;
+    cursor: pointer;
+    display: inline;
+    color: var(--tg-theme-text-color);
+}
+
 .submit-btn {
     width: 100%;
     padding: 12px;
