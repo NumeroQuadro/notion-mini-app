@@ -34,7 +34,7 @@ async function getDatabaseProperties() {
         // Handle checkbox properties specially
         for (const [key, config] of Object.entries(properties)) {
             // Convert checkbox properties to proper checkbox type
-            if (CHECKBOX_PROPERTIES.includes(key.toLowerCase()) && config.type === 'checkbox') {
+            if (CHECKBOX_PROPERTIES.includes(key.toLowerCase())) {
                 logAction('Marking checkbox property', { key });
                 properties[key].type = 'checkbox';
             }
@@ -80,9 +80,9 @@ async function createPropertyFields() {
             label.appendChild(required);
         }
 
-        // Skip creating input fields for unsupported properties
-        if (config.type === 'button' || !config.type) {
-            logAction('Skipping unsupported property in form', { key });
+        // Skip creating input fields for button properties only
+        if (config.type === 'button') {
+            logAction('Skipping button property in form', { key });
             continue;
         }
 
@@ -254,18 +254,36 @@ async function handleSubmit(event) {
             continue;
         }
         
-        // Skip checkbox properties by name
-        if (CHECKBOX_PROPERTIES.includes(element.id.toLowerCase())) {
-            logAction('Skipping known checkbox property', { id: element.id });
+        // Handle different input types
+        if (element.type === 'checkbox') {
+            if (element.checked) {
+                // For multi-select, add to array if not exists
+                const name = element.name;
+                if (!taskData.properties[name]) {
+                    taskData.properties[name] = [];
+                }
+                taskData.properties[name].push(element.value);
+            }
+        } else if (element.type === 'radio') {
+            if (element.checked) {
+                taskData.properties[element.name] = element.value;
+            }
+        } else if (element.type === 'date') {
+            // Format date fields properly
+            if (element.value) {
+                taskData.properties[element.id] = formatDateForNotion(element.value);
+            }
+        } else if (element.tagName === 'DIV') {
+            // Skip container divs
             continue;
-        }
-        
-        // Skip properties with no type or unsupported type
-        if (dbProperties && 
-            (!dbProperties[element.id]?.type || 
-             !dbProperties[element.name]?.type)) {
-            logAction('Skipping property with no type', { id: element.id || element.name });
+        } else if (element.type === 'button') {
+            // Skip actual button elements
             continue;
+        } else {
+            // For other inputs
+            if (element.value) {
+                taskData.properties[element.id] = element.value;
+            }
         }
         
         // Handle different input types
