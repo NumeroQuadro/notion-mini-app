@@ -254,17 +254,17 @@ async function handleSubmit(event) {
             continue;
         }
         
-        // Skip button properties by name
-        if (BUTTON_PROPERTIES.includes(element.id.toLowerCase())) {
-            logAction('Skipping known button property', { id: element.id });
+        // Skip checkbox properties by name
+        if (CHECKBOX_PROPERTIES.includes(element.id.toLowerCase())) {
+            logAction('Skipping known checkbox property', { id: element.id });
             continue;
         }
         
-        // Skip properties identified as buttons in database schema
+        // Skip properties with no type or unsupported type
         if (dbProperties && 
-            (dbProperties[element.id]?.type === 'button' || 
-             dbProperties[element.name]?.type === 'button')) {
-            logAction('Skipping button property from schema', { id: element.id || element.name });
+            (!dbProperties[element.id]?.type || 
+             !dbProperties[element.name]?.type)) {
+            logAction('Skipping property with no type', { id: element.id || element.name });
             continue;
         }
         
