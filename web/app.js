@@ -14,8 +14,8 @@ function logAction(action, data) {
     }).catch(err => console.error('Error logging:', err));
 }
 
-// Known button property names - centralized list
-const BUTTON_PROPERTIES = ['complete', 'status', 'done', 'button', 'checkbox'];
+// Known checkbox property names - centralized list
+const CHECKBOX_PROPERTIES = ['complete', 'status', 'done'];
 
 // Get database properties from the backend
 async function getDatabaseProperties() {
@@ -31,12 +31,12 @@ async function getDatabaseProperties() {
         const properties = await response.json();
         logAction('Properties fetched', properties);
         
-        // Handle button properties specially
+        // Handle checkbox properties specially
         for (const [key, config] of Object.entries(properties)) {
-            // Mark known button properties explicitly or properties with no type
-            if (BUTTON_PROPERTIES.includes(key.toLowerCase()) || !config.type) {
-                logAction('Marking potential button property', { key });
-                properties[key].type = 'button';
+            // Convert checkbox properties to proper checkbox type
+            if (CHECKBOX_PROPERTIES.includes(key.toLowerCase()) && config.type === 'checkbox') {
+                logAction('Marking checkbox property', { key });
+                properties[key].type = 'checkbox';
             }
         }
         
@@ -80,9 +80,9 @@ async function createPropertyFields() {
             label.appendChild(required);
         }
 
-        // Skip creating input fields for button properties
-        if (config.type === 'button') {
-            logAction('Skipping button property in form', { key });
+        // Skip creating input fields for unsupported properties
+        if (config.type === 'button' || !config.type) {
+            logAction('Skipping unsupported property in form', { key });
             continue;
         }
 
