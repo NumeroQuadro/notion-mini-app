@@ -7,7 +7,7 @@ function logAction(action, data) {
     console.log(`[${new Date().toISOString()}] ${action}:`, data);
     
     // Optional: Send logs to server
-    fetch('/api/log', {
+    fetch('/notion/mini-app/api/log', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, data, timestamp: new Date().toISOString() })
@@ -18,7 +18,7 @@ function logAction(action, data) {
 async function getDatabaseProperties() {
     try {
         logAction('Fetching properties', {});
-        const response = await fetch('/api/properties');
+        const response = await fetch('/notion/mini-app/api/properties');
         const properties = await response.json();
         logAction('Properties fetched', properties);
         return properties;
@@ -140,6 +140,22 @@ async function createPropertyFields() {
     logAction('Form fields created', {});
 }
 
+// Helper function for showing popups with fallback
+function showPopup(title, message) {
+    try {
+        // Try to use Telegram's native popup
+        tg.showPopup({
+            title: title,
+            message: message,
+            buttons: [{ type: 'ok' }]
+        });
+    } catch (e) {
+        // Fallback to alert if showPopup is not supported
+        console.log("showPopup not supported, using alert instead:", e);
+        alert(title + ": " + message);
+    }
+}
+
 // Handle form submission
 async function handleSubmit(event) {
     event.preventDefault();
@@ -190,7 +206,7 @@ async function handleSubmit(event) {
     logAction('Sending task data', taskData);
 
     try {
-        const response = await fetch('/api/tasks', {
+        const response = await fetch('/notion/mini-app/api/tasks', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -202,14 +218,17 @@ async function handleSubmit(event) {
             const result = await response.json();
             logAction('Task created', result);
             
-            tg.showPopup({
-                title: 'Success',
-                message: 'Task created successfully!',
-                buttons: [{ type: 'ok' }]
-            });
+            showPopup('Success', 'Task created successfully!');
             
             // Optional: close the mini app after successful submission
-            setTimeout(() => tg.close(), 1500);
+            setTimeout(() => {
+                try {
+                    tg.close();
+                } catch (e) {
+                    console.log("tg.close() not supported:", e);
+                    // Just continue if close is not supported
+                }
+            }, 1500);
         } else {
             throw new Error('Failed to create task');
         }
@@ -217,11 +236,7 @@ async function handleSubmit(event) {
         console.error('Error creating task:', error);
         logAction('Error creating task', { error: error.message });
         
-        tg.showPopup({
-            title: 'Error',
-            message: 'Failed to create task. Please try again.',
-            buttons: [{ type: 'ok' }]
-        });
+        showPopup('Error', 'Failed to create task. Please try again.');
     }
 }
 

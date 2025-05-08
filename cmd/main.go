@@ -90,13 +90,13 @@ func serveStaticFiles() {
 	// Create a file server handler for the root
 	fs := http.FileServer(http.Dir("./web"))
 
-	// Set up API endpoints
-	http.HandleFunc("/api/tasks", handleTasks)
-	http.HandleFunc("/api/properties", handleProperties)
-	http.HandleFunc("/api/log", handleLogs)
-
 	// For the mini app path
 	http.Handle("/notion/mini-app/", http.StripPrefix("/notion/mini-app/", fs))
+
+	// API endpoints
+	http.HandleFunc("/notion/mini-app/api/tasks", handleTasks)
+	http.HandleFunc("/notion/mini-app/api/properties", handleProperties)
+	http.HandleFunc("/notion/mini-app/api/log", handleLogs)
 
 	// Also serve files at the root for local development
 	http.Handle("/", fs)
