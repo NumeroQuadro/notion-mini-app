@@ -19,6 +19,42 @@ const CHECKBOX_PROPERTIES = ['complete', 'status', 'done', 'complete'];
 
 // Initialize Notion Client (initialized on demand)
 let notionClient = null;
+let notionConfig = null;
+
+// Parse .env file to get configuration
+async function parseEnvFile() {
+    if (notionConfig) {
+        return notionConfig;
+    }
+    
+    try {
+        const response = await fetch('/.env');
+        if (!response.ok) {
+            throw new Error(`Failed to fetch .env file: ${response.status}`);
+        }
+        
+        const text = await response.text();
+        const config = {};
+        
+        // Parse the .env format (key=value pairs, one per line)
+        text.split('\n').forEach(line => {
+            // Skip empty lines and comments
+            if (!line || line.startsWith('#')) return;
+            
+            const [key, value] = line.split('=');
+            if (key && value) {
+                config[key.trim()] = value.trim();
+            }
+        });
+        
+        notionConfig = config;
+        logAction('Env config loaded', { keys: Object.keys(config) });
+        return config;
+    } catch (error) {
+        logAction('Error loading .env file', { error: error.message });
+        return {};
+    }
+}
 
 // Initialize Notion client with authentication
 async function getNotionClient() {
@@ -28,25 +64,24 @@ async function getNotionClient() {
     }
     
     try {
-        // Get authentication token and database ID from server
-        const response = await fetch('/notion/mini-app/api/notion-credentials');
+        // Get configuration from .env file
+        const config = await parseEnvFile();
+        const apiToken = config.NOTION_API_KEY;
         
-        if (!response.ok) {
-            throw new Error(`Failed to get Notion credentials: ${response.status}`);
+        if (!apiToken) {
+            throw new Error('Notion API key not found in .env file');
         }
         
-        const credentials = await response.json();
-        
         // Create and return the Notion client
-        if (window.NotionHQClient && credentials.token) {
+        if (window.NotionHQClient) {
             // The UMD build exposes the client constructor as NotionHQClient
             notionClient = new window.NotionHQClient({ 
-                auth: credentials.token 
+                auth: apiToken
             });
             logAction('Notion client initialized', { success: true });
             return notionClient;
         } else {
-            throw new Error('Notion API or credentials not available');
+            throw new Error('Notion API not available');
         }
     } catch (error) {
         logAction('Error initializing Notion client', { error: error.message });
@@ -512,17 +547,12 @@ async function handleSubmit(event) {
     
     try {
         const notionClient = await getNotionClient();
-        if (notionClient) {
+        const config = await parseEnvFile();
+        const databaseId = config.NOTION_DATABASE_ID;
+        
+        if (notionClient && databaseId) {
             useDirectAPI = true;
-            logAction('Using direct Notion API', {});
-            
-            // Get database ID
-            const dbResponse = await fetch('/notion/mini-app/api/notion-credentials');
-            const { databaseId } = await dbResponse.json();
-            
-            if (!databaseId) {
-                throw new Error('Database ID not available');
-            }
+            logAction('Using direct Notion API', { databaseId });
             
             // Convert to Notion properties format
             const notionProperties = convertToNotionProperties(taskData);

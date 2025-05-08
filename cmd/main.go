@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -116,7 +117,9 @@ func serveStaticFiles() {
 	http.HandleFunc("/notion/mini-app/api/tasks", handleTasks)
 	http.HandleFunc("/notion/mini-app/api/properties", handleProperties)
 	http.HandleFunc("/notion/mini-app/api/log", handleLogs)
-	http.HandleFunc("/notion/mini-app/api/notion-credentials", handleNotionCredentials)
+
+	// Serve .env file for client-side configuration
+	http.HandleFunc("/.env", handleEnvFile)
 
 	// Debug endpoints - disable in production
 	http.HandleFunc("/notion/mini-app/api/debug/task", handleDebugTask)
@@ -134,6 +137,44 @@ func serveStaticFiles() {
 	log.Printf("Starting mini app server on %s", server.Addr)
 	log.Printf("Mini app available at: http://%s:%s/notion/mini-app/", host, port)
 	log.Fatal(server.ListenAndServe())
+}
+
+// Handler to serve .env file for client-side configuration
+func handleEnvFile(w http.ResponseWriter, r *http.Request) {
+	// Set content type
+	w.Header().Set("Content-Type", "text/plain")
+
+	// Check environment (don't expose in production)
+	isProd := os.Getenv("ENVIRONMENT") == "production"
+	if isProd {
+		// In production, return a sanitized version with only safe keys
+		envData := []string{
+			"PORT=" + os.Getenv("PORT"),
+			"HOST=" + os.Getenv("HOST"),
+			"MINI_APP_URL=" + os.Getenv("MINI_APP_URL"),
+		}
+		w.Write([]byte(strings.Join(envData, "\n")))
+		return
+	}
+
+	// In development, read and return the actual .env file
+	envBytes, err := os.ReadFile(".env")
+	if err != nil {
+		// If .env file doesn't exist, create one with environment variables
+		envData := []string{
+			"TELEGRAM_BOT_TOKEN=" + os.Getenv("TELEGRAM_BOT_TOKEN"),
+			"NOTION_API_KEY=" + os.Getenv("NOTION_API_KEY"),
+			"NOTION_DATABASE_ID=" + os.Getenv("NOTION_DATABASE_ID"),
+			"MINI_APP_URL=" + os.Getenv("MINI_APP_URL"),
+			"PORT=" + os.Getenv("PORT"),
+			"HOST=" + os.Getenv("HOST"),
+		}
+		w.Write([]byte(strings.Join(envData, "\n")))
+		return
+	}
+
+	// Return the .env file contents
+	w.Write(envBytes)
 }
 
 type TaskRequest struct {
@@ -490,57 +531,4 @@ func handleDebugTask(w http.ResponseWriter, r *http.Request) {
 		"status":  "success",
 		"message": "Debug task created successfully",
 	})
-}
-
-// Handler for providing Notion API credentials to the frontend
-func handleNotionCredentials(w http.ResponseWriter, r *http.Request) {
-	// Set CORS headers
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-	// Handle preflight OPTIONS request
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	// Only handle GET requests
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Check environment (should not expose these in production!)
-	isProd := os.Getenv("ENVIRONMENT") == "production"
-	if isProd {
-		// In production, don't expose credentials directly to the frontend
-		log.Printf("Refusing to expose Notion credentials in production environment")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]string{
-			"status":  "error",
-			"message": "Direct API access is not available in production",
-		})
-		return
-	}
-
-	// Set content type
-	w.Header().Set("Content-Type", "application/json")
-
-	// Get credentials from environment
-	apiToken := os.Getenv("NOTION_API_KEY")
-	dbID := os.Getenv("NOTION_DATABASE_ID")
-
-	// Send response
-	credentials := map[string]string{
-		"token":      apiToken, // For direct client-side API calls
-		"databaseId": dbID,     // Database ID needed for client-side API
-		"status":     "success",
-	}
-
-	if err := json.NewEncoder(w).Encode(credentials); err != nil {
-		log.Printf("Error encoding credentials response: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
 }
