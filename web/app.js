@@ -19,14 +19,21 @@ async function getDatabaseProperties() {
     try {
         logAction('Fetching properties', {});
         const response = await fetch('/notion/mini-app/api/properties');
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`API returned ${response.status}: ${errorText}`);
+        }
+        
         const properties = await response.json();
         logAction('Properties fetched', properties);
         return properties;
     } catch (error) {
         console.error('Error fetching properties:', error);
         logAction('Error fetching properties', { error: error.message });
+        
+        // Return default properties if API fails
         return {
-            // Provide default properties based on your Notion database
             "Name": { type: "title", required: true },
             "Tags": { type: "multi_select", options: ["sometimes-later"] },
             "project": { type: "select", options: ["household-tasks", "the-wellness-hub"] },
@@ -163,9 +170,15 @@ async function handleSubmit(event) {
 
     // Create task data object
     const taskData = {
-        title: document.getElementById('taskTitle').value,
+        title: document.getElementById('taskTitle').value.trim(),
         properties: {}
     };
+    
+    // Validate title
+    if (!taskData.title) {
+        showPopup('Error', 'Task title is required');
+        return;
+    }
 
     // Get form elements
     const form = event.target;
@@ -214,9 +227,16 @@ async function handleSubmit(event) {
             body: JSON.stringify(taskData),
         });
 
+        let resultText = '';
+        try {
+            const resultJson = await response.json();
+            resultText = resultJson.message || JSON.stringify(resultJson);
+        } catch (e) {
+            resultText = await response.text();
+        }
+
         if (response.ok) {
-            const result = await response.json();
-            logAction('Task created', result);
+            logAction('Task created', { status: response.status, text: resultText });
             
             showPopup('Success', 'Task created successfully!');
             
@@ -230,13 +250,13 @@ async function handleSubmit(event) {
                 }
             }, 1500);
         } else {
-            throw new Error('Failed to create task');
+            throw new Error(`Server responded with ${response.status}: ${resultText}`);
         }
     } catch (error) {
         console.error('Error creating task:', error);
         logAction('Error creating task', { error: error.message });
         
-        showPopup('Error', 'Failed to create task. Please try again.');
+        showPopup('Error', `Failed to create task: ${error.message}`);
     }
 }
 

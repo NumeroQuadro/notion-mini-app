@@ -120,6 +120,19 @@ type TaskRequest struct {
 
 // API handler for tasks
 func handleTasks(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Handling task request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+
+	// Set CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Handle preflight OPTIONS request
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	// Only handle POST requests for task creation
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -134,12 +147,21 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("Received task request: Title=%s, Properties=%+v", taskReq.Title, taskReq.Properties)
+
+	// Validate request
+	if taskReq.Title == "" {
+		log.Printf("Missing task title")
+		http.Error(w, "Task title is required", http.StatusBadRequest)
+		return
+	}
+
 	// Create the task in Notion
 	notionClient := notion.NewClient()
 	ctx := context.Background()
 	if err := notionClient.CreateTask(ctx, taskReq.Title, taskReq.Properties); err != nil {
 		log.Printf("Error creating task in Notion: %v", err)
-		http.Error(w, "Failed to create task", http.StatusInternalServerError)
+		http.Error(w, "Failed to create task: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -160,54 +182,105 @@ func handleProperties(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get properties from Notion
-	notionClient := notion.NewClient()
-	ctx := context.Background()
-	properties, err := notionClient.GetDatabaseProperties(ctx)
-	if err != nil {
-		log.Printf("Error fetching properties from Notion: %v", err)
-		http.Error(w, "Failed to fetch properties", http.StatusInternalServerError)
+	log.Printf("Handling properties request from %s", r.RemoteAddr)
+
+	// Set CORS headers to allow requests from any origin
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Handle preflight OPTIONS request
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	// Convert properties to a more frontend-friendly format
+	// Set content type
+	w.Header().Set("Content-Type", "application/json")
+
+	// Try to get properties from Notion
+	notionClient := notion.NewClient()
+	ctx := context.Background()
+	properties, err := notionClient.GetDatabaseProperties(ctx)
+
+	// Prepare a map for the response
 	simplifiedProps := make(map[string]map[string]interface{})
 
-	for name, prop := range properties {
-		propInfo := map[string]interface{}{
-			"type": string(prop.GetType()),
-		}
+	if err != nil {
+		// Log the error
+		log.Printf("Error fetching properties from Notion: %v", err)
 
-		// Add more specific info based on property type
-		switch prop.GetType() {
-		case "multi_select":
-			if multiSelect, ok := prop.(*notionapi.MultiSelectPropertyConfig); ok {
-				options := make([]string, 0)
-				for _, opt := range multiSelect.MultiSelect.Options {
-					options = append(options, opt.Name)
-				}
-				propInfo["options"] = options
-			}
-		case "select":
-			if selectProp, ok := prop.(*notionapi.SelectPropertyConfig); ok {
-				options := make([]string, 0)
-				for _, opt := range selectProp.Select.Options {
-					options = append(options, opt.Name)
-				}
-				propInfo["options"] = options
-			}
+		// Create default properties
+		simplifiedProps = map[string]map[string]interface{}{
+			"Name": {
+				"type":     "title",
+				"required": true,
+			},
+			"Tags": {
+				"type":    "multi_select",
+				"options": []string{"sometimes-later"},
+			},
+			"project": {
+				"type":    "select",
+				"options": []string{"household-tasks", "the-wellness-hub"},
+			},
+			"Date": {
+				"type": "date",
+			},
 		}
+	} else {
+		// Convert properties to a more frontend-friendly format
+		for name, prop := range properties {
+			propType := string(prop.GetType())
+			propInfo := map[string]interface{}{
+				"type": propType,
+			}
 
-		simplifiedProps[name] = propInfo
+			// Add more specific info based on property type
+			switch propType {
+			case "multi_select":
+				if multiSelect, ok := prop.(*notionapi.MultiSelectPropertyConfig); ok {
+					options := make([]string, 0)
+					for _, opt := range multiSelect.MultiSelect.Options {
+						options = append(options, opt.Name)
+					}
+					propInfo["options"] = options
+				}
+			case "select":
+				if selectProp, ok := prop.(*notionapi.SelectPropertyConfig); ok {
+					options := make([]string, 0)
+					for _, opt := range selectProp.Select.Options {
+						options = append(options, opt.Name)
+					}
+					propInfo["options"] = options
+				}
+			}
+
+			simplifiedProps[name] = propInfo
+		}
 	}
 
 	// Return the properties
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(simplifiedProps)
+	log.Printf("Returning %d properties", len(simplifiedProps))
+	if err := json.NewEncoder(w).Encode(simplifiedProps); err != nil {
+		log.Printf("Error encoding properties response: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
 }
 
 // API handler for logs
 func handleLogs(w http.ResponseWriter, r *http.Request) {
+	// Set CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Handle preflight OPTIONS request
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	// Only handle POST requests for logging
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
