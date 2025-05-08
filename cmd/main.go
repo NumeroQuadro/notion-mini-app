@@ -166,10 +166,21 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Filter out button properties to avoid Notion API errors
+	filteredProperties := make(map[string]interface{})
+	for key, value := range taskReq.Properties {
+		// Skip properties that are likely buttons
+		if key == "complete" || key == "status" {
+			log.Printf("Skipping potential button property in handler: %s", key)
+			continue
+		}
+		filteredProperties[key] = value
+	}
+
 	// Create the task in Notion
 	notionClient := notion.NewClient()
 	ctx := context.Background()
-	if err := notionClient.CreateTask(ctx, taskReq.Title, taskReq.Properties); err != nil {
+	if err := notionClient.CreateTask(ctx, taskReq.Title, filteredProperties); err != nil {
 		log.Printf("Error creating task in Notion: %v", err)
 		sendJSONError(http.StatusInternalServerError, "Failed to create task: "+err.Error())
 		return

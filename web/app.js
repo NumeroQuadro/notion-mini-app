@@ -219,6 +219,16 @@ async function handleSubmit(event) {
         errorContainer.style.display = 'none';
     }
 
+    // Get database properties to identify button types
+    let dbProperties;
+    try {
+        dbProperties = await getDatabaseProperties();
+        logAction('Retrieved database properties for task creation', { propertyCount: Object.keys(dbProperties).length });
+    } catch (error) {
+        console.error('Error fetching database properties:', error);
+        // Continue anyway, we'll filter out known button properties
+    }
+
     // Create task data object
     const taskData = {
         title: document.getElementById('taskTitle').value.trim(),
@@ -239,6 +249,9 @@ async function handleSubmit(event) {
     const form = event.target;
     const formElements = form.elements;
     
+    // Known button property names to skip
+    const buttonPropertyNames = ['complete', 'status', 'button', 'done'];
+    
     // Process each form element
     for (let i = 0; i < formElements.length; i++) {
         const element = formElements[i];
@@ -248,10 +261,15 @@ async function handleSubmit(event) {
             continue;
         }
         
-        // Skip button properties - they should not be sent to the server
-        if (element.id === 'complete' || element.id === 'status') {
-            // Button properties are typically named 'complete' or 'status'
-            logAction('Skipping possible button property', { id: element.id });
+        // Skip button properties by name
+        if (buttonPropertyNames.includes(element.id.toLowerCase())) {
+            logAction('Skipping known button property', { id: element.id });
+            continue;
+        }
+        
+        // Skip properties identified as buttons in database schema
+        if (dbProperties && dbProperties[element.id] && dbProperties[element.id].type === 'button') {
+            logAction('Skipping button property from schema', { id: element.id });
             continue;
         }
         

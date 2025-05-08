@@ -30,6 +30,13 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 		return fmt.Errorf("task title cannot be empty")
 	}
 
+	// Get database properties to check for button types
+	dbProps, err := c.GetDatabaseProperties(ctx)
+	if err != nil {
+		log.Printf("Warning: Could not fetch database properties: %v", err)
+		// Continue anyway but be more cautious
+	}
+
 	// Create the base request with title property
 	page := &notionapi.PageCreateRequest{
 		Parent: notionapi.Parent{
@@ -49,33 +56,27 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 		},
 	}
 
-	// Get database properties to identify property types
-	ctx2, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	dbProps, err := c.GetDatabaseProperties(ctx2)
-	if err != nil {
-		log.Printf("Warning: Could not fetch database properties: %v", err)
-		// Continue anyway, we'll try to handle properties based on values
-	} else {
-		log.Printf("Database has %d properties", len(dbProps))
-	}
-
-	// Add custom properties
+	// Add custom properties - but filter out button properties
 	for key, value := range properties {
 		log.Printf("Processing property: %s = %v", key, value)
 
-		// Skip button properties as they can't be set via the API
-		if prop, ok := dbProps[key]; ok && prop.GetType() == "button" {
-			log.Printf("Skipping button property: %s", key)
+		// Skip known button properties or properties that might be buttons
+		if key == "complete" || key == "status" {
+			log.Printf("Skipping potential button property: %s", key)
 			continue
 		}
 
-		// Check if property is named "complete" or "status" - these are often button types
-		if key == "complete" || key == "status" {
-			// Check the database properties to see if this is a button type
-			if prop, ok := dbProps[key]; ok && prop.GetType() == "button" {
-				log.Printf("Skipping button property: %s", key)
-				continue
+		// If we have database properties, check the property type
+		if dbProps != nil {
+			if prop, exists := dbProps[key]; exists {
+				propType := prop.GetType()
+				log.Printf("Property %s has type: %s", key, propType)
+
+				// Skip button type properties
+				if propType == "button" {
+					log.Printf("Skipping button property: %s", key)
+					continue
+				}
 			}
 		}
 
