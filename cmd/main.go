@@ -197,43 +197,14 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 	notionClient := notion.NewClient()
 	ctx := context.Background()
 
-	// Attempt to get database properties to identify button properties
-	dbProps, err := notionClient.GetDatabaseProperties(ctx)
-	var buttonProps []string
-	if err != nil {
-		log.Printf("Warning: Could not fetch database properties: %v", err)
-		// Use default known button property names
-		buttonProps = []string{"complete", "status", "done", "button"}
-	} else {
-		// Identify all button properties from the database schema
-		for name, prop := range dbProps {
-			if prop.GetType() == "button" {
-				buttonProps = append(buttonProps, name)
-				log.Printf("Identified button property in schema: %s", name)
-			}
-		}
-
-		// Add known button names just to be safe
-		buttonProps = append(buttonProps, "complete", "status", "done", "button")
-	}
-
-	// Filter out button properties to avoid Notion API errors
+	// Filter properties to only include supported Notion types
 	filteredProperties := make(map[string]interface{})
 	for key, value := range taskReq.Properties {
-		shouldSkip := false
-
-		// Check against our list of button properties
-		for _, buttonProp := range buttonProps {
-			if key == buttonProp {
-				log.Printf("Skipping known button property in handler: %s", key)
-				shouldSkip = true
-				break
-			}
+		// Skip properties that are not supported by Notion
+		if key == "button" || key == "complete" || key == "status" || key == "done" {
+			continue
 		}
-
-		if !shouldSkip {
-			filteredProperties[key] = value
-		}
+		filteredProperties[key] = value
 	}
 
 	log.Printf("After filtering: %d properties remaining of %d original properties",
@@ -251,7 +222,7 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 
 	// Return success
 	w.WriteHeader(http.StatusCreated)
-	err = json.NewEncoder(w).Encode(map[string]string{
+	err := json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
 		"message": "Task created successfully",
 	})
@@ -313,6 +284,9 @@ func handleProperties(w http.ResponseWriter, r *http.Request) {
 			"Date": {
 				"type": "date",
 			},
+			"Complete": {
+				"type": "checkbox",
+			},
 		}
 	} else {
 		// Convert properties to a more frontend-friendly format
@@ -320,16 +294,6 @@ func handleProperties(w http.ResponseWriter, r *http.Request) {
 			propType := string(prop.GetType())
 			propInfo := map[string]interface{}{
 				"type": propType,
-			}
-
-			// Special handling for button properties (which may not be properly supported)
-			if name == "complete" || name == "status" {
-				// If this is a property that might be a button type
-				if propType == "button" || propType == "" {
-					propInfo["type"] = "button"
-					simplifiedProps[name] = propInfo
-					continue
-				}
 			}
 
 			// Add more specific info based on property type
@@ -352,9 +316,10 @@ func handleProperties(w http.ResponseWriter, r *http.Request) {
 				}
 			case "title":
 				propInfo["required"] = true
-			case "button":
-				// Handle button properties - no additional info needed
-				propInfo["type"] = "button"
+			case "checkbox":
+				propInfo["type"] = "checkbox"
+			case "date":
+				propInfo["type"] = "date"
 			}
 
 			simplifiedProps[name] = propInfo
