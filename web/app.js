@@ -177,6 +177,17 @@ function showPopup(title, message) {
     }
 }
 
+// Format date in YYYY-MM-DD format for Notion
+function formatDateForNotion(dateStr) {
+    try {
+        const date = new Date(dateStr);
+        return date.toISOString().split('T')[0]; // Returns YYYY-MM-DD
+    } catch (e) {
+        console.error("Error formatting date:", e);
+        return dateStr; // Return original if parsing fails
+    }
+}
+
 // Handle form submission
 async function handleSubmit(event) {
     event.preventDefault();
@@ -236,12 +247,19 @@ async function handleSubmit(event) {
             if (element.checked) {
                 taskData.properties[element.name] = element.value;
             }
+        } else if (element.type === 'date') {
+            // Format date fields properly
+            if (element.value) {
+                taskData.properties[element.id] = formatDateForNotion(element.value);
+            }
         } else if (element.tagName === 'DIV') {
             // Skip container divs
             continue;
         } else {
-            // For text, date, etc.
-            taskData.properties[element.id] = element.value;
+            // For other inputs
+            if (element.value) {
+                taskData.properties[element.id] = element.value;
+            }
         }
     }
 

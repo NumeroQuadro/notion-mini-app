@@ -87,16 +87,16 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 			}
 
 		case "Date":
-			// Handle date property
+			// Handle date property using a simpler approach for now
 			if dateStr, ok := value.(string); ok && dateStr != "" {
-				// Skip the complex Date object for now, use a simple text property
-				page.Properties[key] = notionapi.RichTextProperty{
-					RichText: []notionapi.RichText{
-						{
-							Text: &notionapi.Text{
-								Content: dateStr,
-							},
-						},
+				// Convert date string to the format expected by Notion
+				dateStr = formatDateString(dateStr)
+
+				// Use Select property to store the date as a string for now
+				// This is a workaround until we can properly handle the date type
+				page.Properties[key] = notionapi.SelectProperty{
+					Select: notionapi.Option{
+						Name: dateStr,
 					},
 				}
 			}
@@ -141,8 +141,35 @@ func (c *Client) GetDatabaseProperties(ctx context.Context) (map[string]notionap
 
 	// This helper will be useful for debugging
 	for name, config := range db.Properties {
-		log.Printf("Property: %s, Type: %s", name, config.GetType())
+		propType := config.GetType()
+		log.Printf("Property: %s, Type: %s", name, propType)
+
+		// For date properties, check if we should handle them differently
+		if propType == "date" {
+			log.Printf("Found date property: %s", name)
+		}
 	}
 
 	return db.Properties, nil
+}
+
+// formatDateString converts various date formats to a standard format
+func formatDateString(date string) string {
+	// Check if the date is already in YYYY-MM-DD format
+	if len(date) >= 10 && date[4] == '-' && date[7] == '-' {
+		// Already in YYYY-MM-DD format, return first 10 chars
+		return date[:10]
+	}
+
+	// Check MM/DD/YYYY format (common in US)
+	if len(date) >= 10 && date[2] == '/' && date[5] == '/' {
+		month := date[0:2]
+		day := date[3:5]
+		year := date[6:10]
+		return year + "-" + month + "-" + day
+	}
+
+	// For other formats, just return the original and log a warning
+	log.Printf("Warning: Unrecognized date format: %s", date)
+	return date
 }
