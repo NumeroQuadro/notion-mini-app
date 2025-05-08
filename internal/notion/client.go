@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/jomei/notionapi"
 )
@@ -87,18 +88,20 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 			}
 
 		case "Date":
-			// Handle date property using a simpler approach for now
+			// Handle date property correctly using Notion's DateProperty
 			if dateStr, ok := value.(string); ok && dateStr != "" {
-				// Convert date string to the format expected by Notion
-				dateStr = formatDateString(dateStr)
+				// Parse and convert to Notion's Date type
+				parsedDate := parseToNotionDate(dateStr)
 
-				// Use Select property to store the date as a string for now
-				// This is a workaround until we can properly handle the date type
-				page.Properties[key] = notionapi.SelectProperty{
-					Select: notionapi.Option{
-						Name: dateStr,
+				// Create a DateProperty with the proper structure required by Notion
+				page.Properties[key] = notionapi.DateProperty{
+					Date: &notionapi.DateObject{
+						Start: parsedDate,
+						End:   nil, // End date is optional and can be nil
 					},
 				}
+
+				log.Printf("Added Date property: %s", parsedDate.String())
 			}
 
 		default:
@@ -153,7 +156,24 @@ func (c *Client) GetDatabaseProperties(ctx context.Context) (map[string]notionap
 	return db.Properties, nil
 }
 
-// formatDateString converts various date formats to a standard format
+// parseToNotionDate converts a string to a Notion Date pointer
+func parseToNotionDate(dateStr string) *notionapi.Date {
+	formattedStr := formatDateString(dateStr)
+
+	// Parse the formatted date string to a time.Time
+	t, err := time.Parse("2006-01-02", formattedStr)
+	if err != nil {
+		log.Printf("Error parsing date %s: %v", formattedStr, err)
+		return nil
+	}
+
+	// Convert to Notion Date type
+	notionDate := notionapi.Date(t)
+	return &notionDate
+}
+
+// formatDateString converts various date formats to the format Notion expects
+// Notion requires ISO 8601 date strings (YYYY-MM-DD) for dates
 func formatDateString(date string) string {
 	// Check if the date is already in YYYY-MM-DD format
 	if len(date) >= 10 && date[4] == '-' && date[7] == '-' {
@@ -167,6 +187,21 @@ func formatDateString(date string) string {
 		day := date[3:5]
 		year := date[6:10]
 		return year + "-" + month + "-" + day
+	}
+
+	// Try to parse with Go's time package
+	layouts := []string{
+		"01/02/2006", // MM/DD/YYYY
+		"2006-01-02", // YYYY-MM-DD
+		"02-01-2006", // DD-MM-YYYY
+		"01-02-2006", // MM-DD-YYYY
+		time.RFC3339, // YYYY-MM-DDTHH:MM:SSZ
+	}
+
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, date); err == nil {
+			return t.Format("2006-01-02") // Return as YYYY-MM-DD
+		}
 	}
 
 	// For other formats, just return the original and log a warning
