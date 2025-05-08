@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jomei/notionapi"
@@ -96,8 +97,9 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 		log.Printf("Processing property: %s = %v", key, value)
 
 		// Skip known button properties or properties that might be buttons
-		if key == "complete" || key == "status" || key == "done" || key == "button" || key == "checkbox" {
-			log.Printf("Skipping known button property: %s", key)
+		if key == "complete" || key == "status" || key == "done" || key == "button" ||
+			key == "checkbox" || strings.Contains(strings.ToLower(key), "button") {
+			log.Printf("Skipping known button-like property: %s", key)
 			continue
 		}
 
@@ -107,9 +109,9 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 				propType := prop.GetType()
 				log.Printf("Property %s has type: %s", key, propType)
 
-				// Skip button type properties
-				if propType == "button" {
-					log.Printf("Skipping button property: %s", key)
+				// Skip button type properties and any other unsupported types
+				if propType == "button" || propType == "unsupported" {
+					log.Printf("Skipping unsupported property type: %s (type: %s)", key, propType)
 					continue
 				}
 

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -270,8 +271,9 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 	// First pass: Convert properties to the correct type and filter out unsupported ones
 	for key, value := range taskReq.Properties {
 		// Skip known button properties or potentially problematic properties
-		if key == "button" || key == "complete" || key == "status" || key == "done" || key == "checkbox" {
-			log.Printf("Skipping known button property: %s", key)
+		if key == "button" || key == "complete" || key == "status" || key == "done" || key == "checkbox" ||
+			strings.Contains(strings.ToLower(key), "button") {
+			log.Printf("Skipping potentially problematic property: %s", key)
 			continue
 		}
 
@@ -281,9 +283,9 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 				propType := prop.GetType()
 				log.Printf("Found property %s with type %s in database", key, propType)
 
-				// Skip button type properties
-				if propType == "button" {
-					log.Printf("Skipping button property from database: %s", key)
+				// Skip button type properties and other unsupported types
+				if propType == "button" || propType == "unsupported" {
+					log.Printf("Skipping unsupported property type from database: %s (type: %s)", key, propType)
 					continue
 				}
 

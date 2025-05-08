@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Notion Task Manager</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="styles.css">
@@ -41,6 +41,20 @@
                 alert('Error loading config: ' + error.message);
             }
         });
+        
+        // Detect if running in Telegram WebApp
+        if (window.Telegram && window.Telegram.WebApp) {
+            document.body.classList.add('telegram-app');
+            
+            // Apply Telegram theme colors
+            document.documentElement.style.setProperty('--tg-theme-bg-color', window.Telegram.WebApp.backgroundColor || '#ffffff');
+            document.documentElement.style.setProperty('--tg-theme-text-color', window.Telegram.WebApp.textColor || '#000000');
+            document.documentElement.style.setProperty('--tg-theme-button-color', window.Telegram.WebApp.buttonColor || '#2481cc');
+            document.documentElement.style.setProperty('--tg-theme-button-text-color', window.Telegram.WebApp.buttonTextColor || '#ffffff');
+            
+            // Hide test button in Telegram app
+            document.getElementById('testConfigBtn').style.display = 'none';
+        }
     </script>
 </body>
 </html> 

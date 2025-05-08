@@ -128,6 +128,10 @@ async function createPropertyFields() {
     
     logAction('Creating form fields', { properties });
 
+    // Check if we're on a mobile device
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || 
+                    (window.Telegram && window.Telegram.WebApp);
+    
     // Clear container first
     container.innerHTML = '';
 
@@ -135,6 +139,13 @@ async function createPropertyFields() {
     for (const [key, config] of Object.entries(properties)) {
         // Skip the 'Name' property since we already have a title field
         if (key === 'Name' || key === 'title' || config.type === 'title') {
+            continue;
+        }
+        
+        // Skip button-like properties
+        const buttonKeywords = ['button', 'submit', 'action'];
+        if (buttonKeywords.some(keyword => key.toLowerCase().includes(keyword))) {
+            logAction('Skipping button-like property', { key });
             continue;
         }
 
@@ -165,24 +176,61 @@ async function createPropertyFields() {
                 checkboxContainer.className = 'checkbox-group';
                 
                 if (config.options && config.options.length > 0) {
-                    config.options.forEach(option => {
-                        const checkboxDiv = document.createElement('div');
+                    // On mobile, if there are many options, use a select with multiple instead
+                    if (isMobile && config.options.length > 5) {
+                        const select = document.createElement('select');
+                        select.multiple = true;
+                        select.id = key;
+                        select.name = key;
+                        select.dataset.type = 'multi_select';
+                        select.dataset.propName = key;
                         
-                        const checkbox = document.createElement('input');
-                        checkbox.type = 'checkbox';
-                        checkbox.id = `${key}-${option}`;
-                        checkbox.name = key;
-                        checkbox.value = option;
-                        checkbox.dataset.type = 'multi_select';
+                        // Add a helper text
+                        const helpText = document.createElement('div');
+                        helpText.className = 'help-text';
+                        helpText.textContent = 'Tap multiple items to select them';
+                        helpText.style.fontSize = '12px';
+                        helpText.style.color = '#666';
+                        helpText.style.marginBottom = '5px';
                         
-                        const checkboxLabel = document.createElement('label');
-                        checkboxLabel.htmlFor = `${key}-${option}`;
-                        checkboxLabel.textContent = option;
+                        checkboxContainer.appendChild(helpText);
                         
-                        checkboxDiv.appendChild(checkbox);
-                        checkboxDiv.appendChild(checkboxLabel);
-                        checkboxContainer.appendChild(checkboxDiv);
-                    });
+                        config.options.forEach(option => {
+                            const optionElement = document.createElement('option');
+                            optionElement.value = option;
+                            optionElement.textContent = option;
+                            select.appendChild(optionElement);
+                        });
+                        
+                        checkboxContainer.appendChild(select);
+                    } else {
+                        // Use regular checkboxes for fewer options or desktop
+                        config.options.forEach(option => {
+                            const checkboxDiv = document.createElement('div');
+                            
+                            const checkbox = document.createElement('input');
+                            checkbox.type = 'checkbox';
+                            checkbox.id = `${key}-${option}`;
+                            checkbox.name = key;
+                            checkbox.value = option;
+                            checkbox.dataset.type = 'multi_select';
+                            
+                            const checkboxLabel = document.createElement('label');
+                            checkboxLabel.htmlFor = `${key}-${option}`;
+                            checkboxLabel.textContent = option;
+                            
+                            // Make touch targets larger on mobile
+                            if (isMobile) {
+                                checkboxDiv.style.padding = '8px 0';
+                                checkbox.style.width = '24px';
+                                checkbox.style.height = '24px';
+                            }
+                            
+                            checkboxDiv.appendChild(checkbox);
+                            checkboxDiv.appendChild(checkboxLabel);
+                            checkboxContainer.appendChild(checkboxDiv);
+                        });
+                    }
                 } else {
                     // If no options provided, provide a text input with comma separation
                     const textInput = document.createElement('input');
@@ -190,6 +238,7 @@ async function createPropertyFields() {
                     textInput.id = key;
                     textInput.placeholder = 'Enter comma-separated values';
                     textInput.dataset.type = 'multi_select_text';
+                    textInput.dataset.propName = key;
                     checkboxContainer.appendChild(textInput);
                 }
                 
@@ -198,33 +247,64 @@ async function createPropertyFields() {
                 
             case 'select':
                 if (config.options && config.options.length > 0) {
-                    input = document.createElement('div');
-                    input.className = 'radio-group';
-                    
-                    config.options.forEach(option => {
-                        const radioDiv = document.createElement('div');
+                    // For mobile or many options, use a native select element
+                    if (isMobile || config.options.length > 5) {
+                        input = document.createElement('select');
+                        input.id = key;
+                        input.name = key;
+                        input.dataset.type = 'select';
+                        input.dataset.propName = key;
                         
-                        const radio = document.createElement('input');
-                        radio.type = 'radio';
-                        radio.id = `${key}-${option}`;
-                        radio.name = key;
-                        radio.value = option;
-                        radio.dataset.type = 'select';
+                        // Add an empty option
+                        const emptyOption = document.createElement('option');
+                        emptyOption.value = '';
+                        emptyOption.textContent = '-- Select --';
+                        input.appendChild(emptyOption);
                         
-                        const radioLabel = document.createElement('label');
-                        radioLabel.htmlFor = `${key}-${option}`;
-                        radioLabel.textContent = option;
+                        config.options.forEach(option => {
+                            const optionElement = document.createElement('option');
+                            optionElement.value = option;
+                            optionElement.textContent = option;
+                            input.appendChild(optionElement);
+                        });
+                    } else {
+                        // Use radio buttons for desktop with fewer options
+                        input = document.createElement('div');
+                        input.className = 'radio-group';
                         
-                        radioDiv.appendChild(radio);
-                        radioDiv.appendChild(radioLabel);
-                        input.appendChild(radioDiv);
-                    });
+                        config.options.forEach(option => {
+                            const radioDiv = document.createElement('div');
+                            
+                            const radio = document.createElement('input');
+                            radio.type = 'radio';
+                            radio.id = `${key}-${option}`;
+                            radio.name = key;
+                            radio.value = option;
+                            radio.dataset.type = 'select';
+                            
+                            const radioLabel = document.createElement('label');
+                            radioLabel.htmlFor = `${key}-${option}`;
+                            radioLabel.textContent = option;
+                            
+                            // Make touch targets larger on mobile
+                            if (isMobile) {
+                                radioDiv.style.padding = '8px 0';
+                                radio.style.width = '24px';
+                                radio.style.height = '24px';
+                            }
+                            
+                            radioDiv.appendChild(radio);
+                            radioDiv.appendChild(radioLabel);
+                            input.appendChild(radioDiv);
+                        });
+                    }
                 } else {
                     // Fallback to a select dropdown
                     input = document.createElement('select');
                     input.id = key;
                     input.name = key;
                     input.dataset.type = 'select';
+                    input.dataset.propName = key;
                     
                     // Add an empty option
                     const emptyOption = document.createElement('option');
@@ -235,12 +315,35 @@ async function createPropertyFields() {
                 break;
 
             case 'checkbox':
+                const checkboxWrapper = document.createElement('div');
+                checkboxWrapper.style.display = 'flex';
+                checkboxWrapper.style.alignItems = 'center';
+                
                 input = document.createElement('input');
                 input.type = 'checkbox';
                 input.id = key;
                 input.name = key;
                 input.value = 'true';
                 input.dataset.type = 'checkbox';
+                input.dataset.propName = key;
+                
+                // Make touch target larger on mobile
+                if (isMobile) {
+                    input.style.width = '24px';
+                    input.style.height = '24px';
+                    input.style.marginRight = '10px';
+                }
+                
+                const inlineLabel = document.createElement('label');
+                inlineLabel.htmlFor = key;
+                inlineLabel.textContent = 'Yes';
+                inlineLabel.style.marginLeft = '8px';
+                inlineLabel.style.display = 'inline-block';
+                
+                checkboxWrapper.appendChild(input);
+                checkboxWrapper.appendChild(inlineLabel);
+                
+                input = checkboxWrapper;
                 break;
                 
             case 'date':
@@ -248,6 +351,14 @@ async function createPropertyFields() {
                 input.type = 'date';
                 input.id = key;
                 input.dataset.type = 'date';
+                input.dataset.propName = key;
+                
+                // Add better date picker for mobile
+                if (isMobile) {
+                    input.onfocus = function() {
+                        this.showPicker();
+                    };
+                }
                 break;
 
             case 'url':
@@ -256,6 +367,12 @@ async function createPropertyFields() {
                 input.id = key;
                 input.placeholder = 'https://';
                 input.dataset.type = 'url';
+                input.dataset.propName = key;
+                
+                // Add keyboard type for mobile
+                if (isMobile) {
+                    input.setAttribute('inputmode', 'url');
+                }
                 break;
 
             case 'email':
@@ -263,6 +380,12 @@ async function createPropertyFields() {
                 input.type = 'email';
                 input.id = key;
                 input.dataset.type = 'email';
+                input.dataset.propName = key;
+                
+                // Add keyboard type for mobile
+                if (isMobile) {
+                    input.setAttribute('inputmode', 'email');
+                }
                 break;
 
             case 'phone_number':
@@ -270,6 +393,12 @@ async function createPropertyFields() {
                 input.type = 'tel';
                 input.id = key;
                 input.dataset.type = 'phone_number';
+                input.dataset.propName = key;
+                
+                // Add keyboard type for mobile
+                if (isMobile) {
+                    input.setAttribute('inputmode', 'tel');
+                }
                 break;
 
             case 'number':
@@ -277,6 +406,13 @@ async function createPropertyFields() {
                 input.type = 'number';
                 input.id = key;
                 input.dataset.type = 'number';
+                input.dataset.propName = key;
+                
+                // Add keyboard type for mobile
+                if (isMobile) {
+                    input.setAttribute('inputmode', 'numeric');
+                    input.step = 'any'; // Allow decimals
+                }
                 break;
                 
             default:
@@ -284,10 +420,10 @@ async function createPropertyFields() {
                 input.type = 'text';
                 input.id = key;
                 input.dataset.type = 'text';
+                input.dataset.propName = key;
         }
 
         input.required = config.required || false;
-        input.dataset.propName = key;
 
         formGroup.appendChild(label);
         formGroup.appendChild(input);
@@ -428,6 +564,23 @@ function convertToNotionProperties(formData) {
     return properties;
 }
 
+// Before sending taskData to the server, filter out button properties
+function filterButtonProperties(taskData) {
+    const filtered = { ...taskData };
+    const buttonKeywords = ['button', 'submit', 'action'];
+    
+    // Filter out properties with button-like names
+    Object.keys(filtered.properties).forEach(key => {
+        const lowercaseKey = key.toLowerCase();
+        if (buttonKeywords.some(keyword => lowercaseKey.includes(keyword))) {
+            console.log(`Filtering out button-like property: ${key}`);
+            delete filtered.properties[key];
+        }
+    });
+    
+    return filtered;
+}
+
 // Handle form submission
 async function handleSubmit(event) {
     event.preventDefault();
@@ -535,6 +688,13 @@ async function handleSubmit(event) {
 
     logAction('Task data collected', taskData);
 
+    // Filter out button properties before sending to server
+    const filteredTaskData = filterButtonProperties(taskData);
+    logAction('Filtered task data', { 
+        original: Object.keys(taskData.properties).length, 
+        filtered: Object.keys(filteredTaskData.properties).length 
+    });
+
     // Try to use direct Notion API if available
     let useDirectAPI = false;
     
@@ -548,7 +708,7 @@ async function handleSubmit(event) {
             logAction('Using direct Notion API', { databaseId });
             
             // Convert to Notion properties format
-            const notionProperties = convertToNotionProperties(taskData);
+            const notionProperties = convertToNotionProperties(filteredTaskData);
             
             // Create page in Notion database
             const response = await notionClient.pages.create({
@@ -587,7 +747,7 @@ async function handleSubmit(event) {
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify(taskData),
+            body: JSON.stringify(filteredTaskData),
         });
         
         // Race the fetch against timeout
