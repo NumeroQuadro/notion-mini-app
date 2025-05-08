@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -143,6 +144,11 @@ func serveStaticFiles() {
 func handleEnvFile(w http.ResponseWriter, r *http.Request) {
 	// Set content type
 	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Log debug info
+	cwd, _ := os.Getwd()
+	log.Printf("Handling .env request. Current working directory: %s", cwd)
 
 	// Check environment (don't expose in production)
 	isProd := os.Getenv("ENVIRONMENT") == "production"
@@ -157,24 +163,73 @@ func handleEnvFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// In development, read and return the actual .env file
-	envBytes, err := os.ReadFile(".env")
-	if err != nil {
-		// If .env file doesn't exist, create one with environment variables
-		envData := []string{
-			"TELEGRAM_BOT_TOKEN=" + os.Getenv("TELEGRAM_BOT_TOKEN"),
-			"NOTION_API_KEY=" + os.Getenv("NOTION_API_KEY"),
-			"NOTION_DATABASE_ID=" + os.Getenv("NOTION_DATABASE_ID"),
-			"MINI_APP_URL=" + os.Getenv("MINI_APP_URL"),
-			"PORT=" + os.Getenv("PORT"),
-			"HOST=" + os.Getenv("HOST"),
+	// Possible file locations to check
+	possiblePaths := []string{
+		".env",                      // Current directory
+		"../.env",                   // Parent directory
+		"/app/.env",                 // Docker container root
+		cwd + "/.env",               // Absolute path to current dir
+		os.Getenv("HOME") + "/.env", // User's home directory
+	}
+
+	// Try to find and read the .env file from possible locations
+	var envBytes []byte
+	var err error
+	var foundPath string
+
+	for _, path := range possiblePaths {
+		log.Printf("Trying to load .env from: %s", path)
+		envBytes, err = os.ReadFile(path)
+		if err == nil {
+			foundPath = path
+			log.Printf("Successfully loaded .env from: %s", path)
+			break
 		}
-		w.Write([]byte(strings.Join(envData, "\n")))
+	}
+
+	// If found, return the .env file contents
+	if foundPath != "" {
+		w.Write(envBytes)
 		return
 	}
 
-	// Return the .env file contents
-	w.Write(envBytes)
+	// If .env file doesn't exist anywhere, log the error and create default values
+	log.Printf("Could not find .env file in any location. Error: %v", err)
+
+	// Generate .env content from environment variables
+	envData := []string{
+		"# Auto-generated .env file",
+		"TELEGRAM_BOT_TOKEN=" + os.Getenv("TELEGRAM_BOT_TOKEN"),
+		"NOTION_API_KEY=" + os.Getenv("NOTION_API_KEY"),
+		"NOTION_DATABASE_ID=" + os.Getenv("NOTION_DATABASE_ID"),
+		"MINI_APP_URL=" + os.Getenv("MINI_APP_URL"),
+		"PORT=" + os.Getenv("PORT"),
+		"HOST=" + os.Getenv("HOST"),
+	}
+
+	envContent := strings.Join(envData, "\n")
+
+	// Try to create a new .env file in the current directory
+	localEnvPath := ".env"
+	writeErr := os.WriteFile(localEnvPath, []byte(envContent), 0644)
+	if writeErr == nil {
+		log.Printf("Created new .env file at %s", localEnvPath)
+	} else {
+		log.Printf("Failed to create .env file: %v", writeErr)
+
+		// Try alternative location
+		altPath := filepath.Join(cwd, ".env")
+		writeErr = os.WriteFile(altPath, []byte(envContent), 0644)
+		if writeErr == nil {
+			log.Printf("Created new .env file at alternative location: %s", altPath)
+		} else {
+			log.Printf("Failed to create .env file at alternative location: %v", writeErr)
+		}
+	}
+
+	// Return the generated content regardless of whether we could save it
+	log.Printf("Returning generated .env content with %d bytes", len(envContent))
+	w.Write([]byte(envContent))
 }
 
 type TaskRequest struct {

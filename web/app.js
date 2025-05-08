@@ -28,12 +28,44 @@ async function parseEnvFile() {
     }
     
     try {
-        const response = await fetch('/.env');
-        if (!response.ok) {
-            throw new Error(`Failed to fetch .env file: ${response.status}`);
+        // Try multiple possible paths
+        const paths = [
+            '/.env',                // Server root
+            '/notion/mini-app/.env', // Mini app path
+            '.env',                  // Relative to current page
+            '../.env'                // Parent directory
+        ];
+        
+        let response = null;
+        let text = null;
+        
+        // Try each path
+        for (const path of paths) {
+            try {
+                logAction('Trying to fetch .env from', { path });
+                const resp = await fetch(path);
+                if (resp.ok) {
+                    response = resp;
+                    logAction('Successfully fetched .env from', { path });
+                    break;
+                }
+            } catch (e) {
+                logAction('Failed to fetch .env from', { path, error: e.message });
+            }
         }
         
-        const text = await response.text();
+        if (!response || !response.ok) {
+            throw new Error(`Failed to fetch .env file: ${response ? response.status : 'No response'}`);
+        }
+        
+        text = await response.text();
+        
+        // If the response is empty or not valid, use hard-coded fallback
+        if (!text || text.trim().length === 0) {
+            logAction('Received empty .env file, using fallbacks', {});
+            throw new Error('Empty .env file received');
+        }
+        
         const config = {};
         
         // Parse the .env format (key=value pairs, one per line)
@@ -41,18 +73,38 @@ async function parseEnvFile() {
             // Skip empty lines and comments
             if (!line || line.startsWith('#')) return;
             
-            const [key, value] = line.split('=');
+            const [key, ...valueParts] = line.split('=');
+            // Handle values that might contain = signs
+            const value = valueParts.join('=');
+            
             if (key && value) {
                 config[key.trim()] = value.trim();
             }
         });
+        
+        // Check if we got essential configuration
+        if (!config.NOTION_API_KEY || !config.NOTION_DATABASE_ID) {
+            logAction('Missing essential configuration in .env', { 
+                hasApiKey: !!config.NOTION_API_KEY,
+                hasDatabaseId: !!config.NOTION_DATABASE_ID
+            });
+        }
         
         notionConfig = config;
         logAction('Env config loaded', { keys: Object.keys(config) });
         return config;
     } catch (error) {
         logAction('Error loading .env file', { error: error.message });
-        return {};
+        
+        // Return fallback config
+        notionConfig = {
+            // You can include default test keys here if appropriate
+            // NOTION_API_KEY: 'secret_...',
+            // NOTION_DATABASE_ID: '...',
+            _source: 'fallback'
+        };
+        
+        return notionConfig;
     }
 }
 
@@ -69,7 +121,8 @@ async function getNotionClient() {
         const apiToken = config.NOTION_API_KEY;
         
         if (!apiToken) {
-            throw new Error('Notion API key not found in .env file');
+            logAction('No API token available', { configSource: config._source });
+            throw new Error('Notion API key not found in configuration');
         }
         
         // Create and return the Notion client
@@ -81,11 +134,12 @@ async function getNotionClient() {
             logAction('Notion client initialized', { success: true });
             return notionClient;
         } else {
-            throw new Error('Notion API not available');
+            throw new Error('Notion API not available in this browser');
         }
     } catch (error) {
         logAction('Error initializing Notion client', { error: error.message });
-        // Return null to indicate failure
+        
+        // Always return null to indicate failure
         return null;
     }
 }
