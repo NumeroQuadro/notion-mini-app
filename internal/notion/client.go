@@ -47,6 +47,7 @@ type Client struct {
 	client        *notionapi.Client
 	taskDbID      string
 	notesDbID     string
+	journalDbID   string
 	dbCache       map[string]map[string]notionapi.PropertyConfig
 	dbCacheExpiry map[string]time.Time
 }
@@ -55,6 +56,7 @@ func NewClient() *Client {
 	apiToken := os.Getenv("NOTION_API_KEY")
 	taskDbID := os.Getenv("NOTION_TASKS_DATABASE_ID")
 	notesDbID := os.Getenv("NOTION_NOTES_DATABASE_ID")
+	journalDbID := os.Getenv("NOTION_JOURNAL_DATABASE_ID")
 
 	if apiToken == "" {
 		log.Printf("WARNING: NOTION_API_KEY environment variable is not set")
@@ -72,6 +74,10 @@ func NewClient() *Client {
 		log.Printf("WARNING: NOTION_NOTES_DATABASE_ID environment variable is not set")
 	}
 
+	if journalDbID == "" {
+		log.Printf("WARNING: NOTION_JOURNAL_DATABASE_ID environment variable is not set")
+	}
+
 	// Create standard Notion client
 	client := notionapi.NewClient(notionapi.Token(apiToken))
 
@@ -79,6 +85,7 @@ func NewClient() *Client {
 		client:        client,
 		taskDbID:      taskDbID,
 		notesDbID:     notesDbID,
+		journalDbID:   journalDbID,
 		dbCache:       make(map[string]map[string]notionapi.PropertyConfig),
 		dbCacheExpiry: make(map[string]time.Time),
 	}
@@ -90,6 +97,10 @@ func (c *Client) GetTasksDatabaseID() string {
 
 func (c *Client) GetNotesDatabaseID() string {
 	return c.notesDbID
+}
+
+func (c *Client) GetJournalDatabaseID() string {
+	return c.journalDbID
 }
 
 func (c *Client) CreateTask(ctx context.Context, title string, properties map[string]interface{}, dbType string) error {
@@ -256,6 +267,8 @@ func (c *Client) getDbIDForType(dbType string) string {
 		return c.notesDbID
 	case "tasks":
 		return c.taskDbID
+	case "journal":
+		return c.journalDbID
 	default:
 		// Default to tasks database for backward compatibility
 		return c.taskDbID

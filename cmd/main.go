@@ -160,6 +160,7 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 	// Add boolean flags for available databases
 	hasTasksDb := notionClient.GetTasksDatabaseID() != ""
 	hasNotesDb := notionClient.GetNotesDatabaseID() != ""
+	hasJournalDb := notionClient.GetJournalDatabaseID() != ""
 
 	if hasTasksDb {
 		config["HAS_TASKS_DB"] = "true"
@@ -173,20 +174,29 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 		config["HAS_NOTES_DB"] = "false"
 	}
 
+	if hasJournalDb {
+		config["HAS_JOURNAL_DB"] = "true"
+	} else {
+		config["HAS_JOURNAL_DB"] = "false"
+	}
+
 	// Add sensitive info only in non-production environments
 	if !isProd {
 		notionKey := os.Getenv("NOTION_API_KEY")
 		tasksDbID := notionClient.GetTasksDatabaseID()
 		notesDbID := notionClient.GetNotesDatabaseID()
+		journalDbID := notionClient.GetJournalDatabaseID()
 
 		// Log available keys (without exposing their values)
 		log.Printf("Config: NOTION_API_KEY available: %v", notionKey != "")
 		log.Printf("Config: NOTION_TASKS_DATABASE_ID available: %v", tasksDbID != "")
 		log.Printf("Config: NOTION_NOTES_DATABASE_ID available: %v", notesDbID != "")
+		log.Printf("Config: NOTION_JOURNAL_DATABASE_ID available: %v", journalDbID != "")
 
 		config["NOTION_API_KEY"] = notionKey
 		config["NOTION_TASKS_DATABASE_ID"] = tasksDbID
 		config["NOTION_NOTES_DATABASE_ID"] = notesDbID
+		config["NOTION_JOURNAL_DATABASE_ID"] = journalDbID
 	}
 
 	// Return configuration as JSON

@@ -5,6 +5,7 @@ if(tg) tg.expand();
 let schemaCache = {};
 let submitting = false;
 let currentDbType = "tasks"; // Track current database type
+let currentSection = "home"; // Track current section (home, form, recent-tasks)
 
 // Renderers for different property types
 const renderers = {
@@ -43,6 +44,30 @@ function multiSelectField(key,cfg){
   // If no options, return a text input as fallback
   if (!cfg.options || cfg.options.length === 0) {
     return create('input',{type:'text',id:key,name:key,placeholder:'Comma-separated values',required:cfg.required});
+  }
+  
+  // Special case for Mood - always use scrollable multi-select
+  if(key === 'Mood') {
+    const wrapper = create('div', {className: 'scrollable-multiselect'});
+    const checkboxes = document.createElement('div');
+    checkboxes.className = 'checkbox-container';
+    
+    cfg.options.forEach(o => {
+      const label = document.createElement('label');
+      label.className = 'checkbox-label';
+      
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.name = key;
+      checkbox.value = o;
+      
+      label.appendChild(checkbox);
+      label.appendChild(document.createTextNode(' ' + o));
+      checkboxes.appendChild(label);
+    });
+    
+    wrapper.appendChild(checkboxes);
+    return wrapper;
   }
   
   // Large lists on mobile get a multi-select dropdown
@@ -147,10 +172,32 @@ async function buildForm(){
     const errorContainer = document.getElementById('error-container');
     if (errorContainer) errorContainer.style.display = 'none';
     
-    // Update submit button text based on current db type
+    // Update form title and submit button text based on current db type
+    const formTitle = document.getElementById('formTitle');
+    if (formTitle) {
+      if (currentDbType === 'tasks') {
+        formTitle.textContent = 'Create New Task';
+      } else if (currentDbType === 'notes') {
+        formTitle.textContent = 'Create New Note';
+      } else if (currentDbType === 'journal') {
+        formTitle.textContent = 'Create Journal Entry';
+      } else {
+        formTitle.textContent = 'Create New Item';
+      }
+    }
+    
+    // Update submit button text
     const submitBtn = document.getElementById('submitBtn');
     if (submitBtn) {
-      submitBtn.textContent = `Create ${currentDbType === 'tasks' ? 'Task' : 'Note'}`;
+      if (currentDbType === 'tasks') {
+        submitBtn.textContent = 'Create Task';
+      } else if (currentDbType === 'notes') {
+        submitBtn.textContent = 'Create Note';
+      } else if (currentDbType === 'journal') {
+        submitBtn.textContent = 'Save Entry';
+      } else {
+        submitBtn.textContent = 'Create Item';
+      }
     }
     
     // If schema is empty, show warning but still allow form submission
@@ -266,9 +313,8 @@ async function handleSubmit(e){
       }
       
       // Success!
-      showMessage(`${currentDbType === 'tasks' ? 'Task' : 'Note'} created successfully!`, false);
+      showMessage(`${currentDbType === 'tasks' ? 'Task' : currentDbType === 'notes' ? 'Note' : 'Journal entry'} created successfully!`, false);
       e.target.reset();
-      
     } catch (apiError) {
       console.error("API error:", apiError);
       showMessage('Error saving to Notion. Please try again.', true);
@@ -288,38 +334,58 @@ async function handleSubmit(e){
   }
 }
 
-// Setup tab switching
-function setupTabs() {
-  document.querySelectorAll('.tab').forEach(tab => {
-    tab.addEventListener('click', async function() {
-      if (submitting) return; // Don't switch tabs during submission
+// Setup tile navigation
+function setupTileNavigation() {
+  // Add click handler to all tiles
+  document.querySelectorAll('.tile').forEach(tile => {
+    tile.addEventListener('click', () => {
+      if (submitting) return; // Don't navigate during submission
       
-      // Update active tab
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      this.classList.add('active');
+      if (tile.dataset.action === 'recent-tasks') {
+        navigateTo('recent-tasks');
+        return;
+      }
       
-      // Get and store database type
-      currentDbType = this.getAttribute('data-db-type');
-      console.log(`Switched to ${currentDbType} database`);
-      
-      const tabId = this.getAttribute('id');
-      
-      // Show/hide sections based on selected tab
-      if (tabId === 'recentTasksTab') {
-        document.getElementById('formSection').style.display = 'none';
-        document.getElementById('recentTasksSection').style.display = 'block';
-        
-        // Load recent tasks
-        loadRecentTasks();
-      } else {
-        document.getElementById('formSection').style.display = 'block';
-        document.getElementById('recentTasksSection').style.display = 'none';
-        
-        // Rebuild form for this database type
-        await buildForm();
+      // Handle database tiles
+      if (tile.dataset.dbType) {
+        currentDbType = tile.dataset.dbType;
+        navigateTo('form');
       }
     });
   });
+  
+  // Setup back button
+  document.querySelector('.back-btn')?.addEventListener('click', () => {
+    navigateTo('home');
+  });
+}
+
+// Navigate between sections
+function navigateTo(section) {
+  currentSection = section;
+  
+  // Hide all sections
+  document.getElementById('home-screen').style.display = 'none';
+  document.getElementById('formSection').style.display = 'none';
+  document.getElementById('recentTasksSection').style.display = 'none';
+  
+  // Show back button for non-home sections
+  document.getElementById('back-button').style.display = section === 'home' ? 'none' : 'block';
+  
+  // Show the selected section
+  switch(section) {
+    case 'home':
+      document.getElementById('home-screen').style.display = 'block';
+      break;
+    case 'form':
+      document.getElementById('formSection').style.display = 'block';
+      buildForm(); // Build/rebuild the form with current database type
+      break;
+    case 'recent-tasks':
+      document.getElementById('recentTasksSection').style.display = 'block';
+      loadRecentTasks();
+      break;
+  }
 }
 
 // Fetch and display recent tasks
@@ -471,26 +537,24 @@ async function checkDatabaseAvailability() {
     
     const config = await response.json();
     
-    // Hide notes tab if not available
+    // Hide database tiles if not available
     if (config.HAS_NOTES_DB !== "true") {
-      const notesTab = document.getElementById('notesTab');
-      if (notesTab) notesTab.style.display = 'none';
+      const notesTile = document.querySelector('.notes-tile');
+      if (notesTile) notesTile.style.display = 'none';
     }
     
-    // Hide tasks tab if not available
     if (config.HAS_TASKS_DB !== "true") {
-      const tasksTab = document.getElementById('tasksTab');
-      if (tasksTab) tasksTab.style.display = 'none';
+      const tasksTile = document.querySelector('.tasks-tile');
+      if (tasksTile) tasksTile.style.display = 'none';
       
-      // If tasks not available but notes is, switch to notes
-      if (config.HAS_NOTES_DB === "true") {
-        currentDbType = "notes";
-        const notesTab = document.getElementById('notesTab');
-        if (notesTab) {
-          notesTab.classList.add('active');
-          document.getElementById('tasksTab')?.classList.remove('active');
-        }
-      }
+      // Hide recent tasks tile if tasks DB is not available
+      const recentTasksTile = document.querySelector('.recent-tasks-tile');
+      if (recentTasksTile) recentTasksTile.style.display = 'none';
+    }
+    
+    if (config.HAS_JOURNAL_DB !== "true") {
+      const journalTile = document.querySelector('.journal-tile');
+      if (journalTile) journalTile.style.display = 'none';
     }
   } catch (error) {
     console.error("Error checking database availability:", error);
@@ -499,15 +563,15 @@ async function checkDatabaseAvailability() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // Setup tab switching
-  setupTabs();
+  // Setup tile navigation
+  setupTileNavigation();
   
   // Check which databases are available
   await checkDatabaseAvailability();
   
-  // Build the initial form
-  await buildForm();
-  
   // Setup form submission
   document.getElementById('taskForm').addEventListener('submit', handleSubmit);
+  
+  // Start on the home screen
+  navigateTo('home');
 });
