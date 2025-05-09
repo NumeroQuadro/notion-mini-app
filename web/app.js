@@ -432,9 +432,9 @@ async function loadRecentTasks() {
         taskDetails += `<div class="task-tags">Tags: ${task.properties.Tags.join(', ')}</div>`;
       }
       
-      // Add created date
+      // Simplify date format - only show date without time and without "Created:" label
       const createdDate = new Date(task.created_at);
-      const formattedDate = createdDate.toLocaleDateString() + ' ' + createdDate.toLocaleTimeString();
+      const formattedDate = createdDate.toLocaleDateString();
       
       // Add checkbox for task completion
       const checkboxId = `task-complete-${task.id}`;
@@ -446,7 +446,7 @@ async function loadRecentTasks() {
             <label for="${checkboxId}"></label>
           </div>
           <div class="task-title">${taskTitle.outerHTML}</div>
-          <div class="task-date">Created: ${formattedDate}</div>
+          <div class="task-date">${formattedDate}</div>
         </div>
         <div class="task-properties">
           ${taskDetails}

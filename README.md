@@ -1,6 +1,6 @@
 # Notion Task Manager Telegram Mini App
 
-A Telegram mini app that allows users to create and manage tasks in Notion databases directly from Telegram.
+A Telegram mini app that serves only for one user (its me hahaha) and allows to create and manage tasks in Notion databases directly from Telegram.
 
 ## Features
 
@@ -56,15 +56,6 @@ A Telegram mini app that allows users to create and manage tasks in Notion datab
 ├── go.mod              # Go module file
 └── README.md           # Project documentation
 ```
-
-## Button Property Support
-
-This application includes a workaround for Notion's button properties, which are not fully supported by the official Notion API client. The implementation:
-
-1. Skips button properties during database operations
-2. Provides graceful fallbacks when button properties are encountered
-3. Shows warning messages rather than blocking errors
-4. Still allows users to work with databases containing button properties
 
 ## Multiple Database Support
 
