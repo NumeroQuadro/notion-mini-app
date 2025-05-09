@@ -357,17 +357,20 @@ func handleProperties(w http.ResponseWriter, r *http.Request) {
 	// If there was an error but we still want to proceed
 	var errorMessage string
 	var buttonPropertyDetected bool
+	var partialSuccess bool = false
 
 	if err != nil {
 		errorMessage = fmt.Sprintf("Failed to get full database properties: %v", err)
 		log.Printf("Error getting database properties: %v", err)
 
 		// Check if it's a button property error
-		if strings.Contains(err.Error(), "button") || strings.Contains(err.Error(), "unsupported property type") {
+		if strings.Contains(strings.ToLower(err.Error()), "button") ||
+			strings.Contains(err.Error(), "unsupported property type") {
 			buttonPropertyDetected = true
 			log.Printf("Button property detected, will continue with partial properties")
-		} else {
-			// For other errors, return the error without properties
+			partialSuccess = properties != nil && len(properties) > 0
+		} else if properties == nil || len(properties) == 0 {
+			// For other errors with no properties, return the error
 			sendJSONError(http.StatusInternalServerError, errorMessage, nil)
 			return
 		}
@@ -384,9 +387,9 @@ func handleProperties(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Skip button properties to avoid API errors
-			if propType == "button" {
+			if propType == "button" || propType == "unsupported" {
 				buttonPropertyDetected = true
-				log.Printf("Skipping button property: %s", name)
+				log.Printf("Skipping unsupported property: %s (type: %s)", name, propType)
 				continue
 			}
 
@@ -397,22 +400,18 @@ func handleProperties(w http.ResponseWriter, r *http.Request) {
 			// Add options for select and multi_select types
 			switch propType {
 			case "select":
-				if selectProp, ok := prop.(*notionapi.SelectPropertyConfig); ok {
+				if selectProp, ok := prop.(*notionapi.SelectPropertyConfig); ok && selectProp.Select.Options != nil {
 					options := make([]string, 0)
-					if selectProp.Select.Options != nil {
-						for _, opt := range selectProp.Select.Options {
-							options = append(options, opt.Name)
-						}
+					for _, opt := range selectProp.Select.Options {
+						options = append(options, opt.Name)
 					}
 					propInfo["options"] = options
 				}
 			case "multi_select":
-				if multiSelectProp, ok := prop.(*notionapi.MultiSelectPropertyConfig); ok {
+				if multiSelectProp, ok := prop.(*notionapi.MultiSelectPropertyConfig); ok && multiSelectProp.MultiSelect.Options != nil {
 					options := make([]string, 0)
-					if multiSelectProp.MultiSelect.Options != nil {
-						for _, opt := range multiSelectProp.MultiSelect.Options {
-							options = append(options, opt.Name)
-						}
+					for _, opt := range multiSelectProp.MultiSelect.Options {
+						options = append(options, opt.Name)
 					}
 					propInfo["options"] = options
 				}
@@ -424,8 +423,14 @@ func handleProperties(w http.ResponseWriter, r *http.Request) {
 
 	// If there was a button property, send a warning but still include properties
 	if buttonPropertyDetected {
-		log.Printf("Returning properties with button property warning")
-		sendJSONError(http.StatusOK, "Database contains button properties which are not fully supported. Some properties may not be shown.", result)
+		statusCode := http.StatusOK
+		if !partialSuccess {
+			statusCode = http.StatusPartialContent
+		}
+
+		warningMsg := "Database contains button properties which are not fully supported. Some properties may not be shown."
+		log.Printf("Returning properties with button property warning: %d properties available", len(result))
+		sendJSONError(statusCode, warningMsg, result)
 		return
 	}
 

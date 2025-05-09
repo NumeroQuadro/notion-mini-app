@@ -1,14 +1,16 @@
-// public/mini-app.js — concise Notion mini-app script
+// app.js — Notion mini-app script with improved button property handling
 const tg = window.Telegram?.WebApp;
 if(tg) tg.expand();
 
 // Cache and state
 let schemaCache = {};
 let submitting = false;
+let currentDbType = "tasks"; // Track current database type
 
 // Renderers for different property types
 const renderers = {
-  title:        () => null,
+  title:        () => null, // Skip title as it's handled separately
+  rich_text:    (k,c) => create('input',{type:'text',id:k,name:k,required:c.required}),
   text:         (k,c) => create('input',{type:'text',id:k,name:k,required:c.required}),
   date:         (k,c) => create('input',{type:'date',id:k,name:k,required:c.required}),
   select:       (k,c) => selectField(k,c),
@@ -19,8 +21,9 @@ const renderers = {
   url:          (k,c) => create('input',{type:'url',id:k,name:k,placeholder:'https://',required:c.required}),
   email:        (k,c) => create('input',{type:'email',id:k,name:k,required:c.required}),
   phone_number: (k,c) => create('input',{type:'tel',id:k,name:k,required:c.required}),
-  // Explicitly ignore button property type
+  // Explicitly skip button property type
   button:       () => null,
+  unsupported:  () => null
 };
 
 // Helper to create elements
@@ -33,49 +36,57 @@ function create(tag,attrs={},...kids){
 
 function selectField(key, cfg) {
   const sel = create('select',{id:key,name:key,required:cfg.required}, create('option',{value:''},'--Select--'));
-  cfg.options.forEach(o=> sel.append(create('option',{value:o},o)));
+  (cfg.options || []).forEach(o=> sel.append(create('option',{value:o},o)));
   return sel;
 }
 
 function multiSelectField(key,cfg){
-  // large lists on mobile get a multi-select dropdown
+  // If no options, return a text input as fallback
+  if (!cfg.options || cfg.options.length === 0) {
+    return create('input',{type:'text',id:key,name:key,placeholder:'Comma-separated values',required:cfg.required});
+  }
+  
+  // Large lists on mobile get a multi-select dropdown
   if(cfg.options.length>5 && /Mobi/i.test(navigator.userAgent)){
     const sel=create('select',{id:key,name:key,multiple:true});
     cfg.options.forEach(o=> sel.append(create('option',{value:o},o)));
     return sel;
   }
-  // else checkbox list
+  
+  // Else checkbox list
   return cfg.options.map(o=>
-    create('label',{},
+    create('label',{className:'checkbox-label'},
       create('input',{type:'checkbox',name:key,value:o}), ' '+o
     )
   );
 }
 
-async function fetchSchema(){
+async function fetchSchema(dbType = "tasks"){
   try {
-    if(!schemaCache.tasks){
-      const r=await fetch('/notion/mini-app/api/properties?db_type=tasks');
-      if(!r.ok) {
-        // Try to get properties even from an error response
-        const data = await r.json();
-        if (data && data.properties) {
-          schemaCache.tasks = data.properties;
-          
-          // Show warning if we have an error message but still got properties
-          if(data.error && data.error.includes('button')) {
-            showWarning("Some button properties in the database are skipped");
-          }
-        } else {
-          throw Error(data?.error || r.statusText);
+    if(!schemaCache[dbType]){
+      const r=await fetch(`/notion/mini-app/api/properties?db_type=${dbType}`);
+      const data = await r.json();
+      
+      if (data && data.properties) {
+        schemaCache[dbType] = data.properties;
+        
+        // Show warning if we have an error message but still got properties
+        if(data.error && data.error.includes('button')) {
+          showWarning("Some button properties in the database are skipped");
         }
+      } else if (data && Object.keys(data).length > 0) {
+        // Regular response format
+        schemaCache[dbType] = data;
       } else {
-        schemaCache.tasks = await r.json();
+        console.warn("Schema response empty or invalid:", data);
+        // Return empty schema as fallback
+        schemaCache[dbType] = {};
       }
     }
-    return schemaCache.tasks;
+    return schemaCache[dbType];
   } catch(err) {
     console.error("Error fetching schema:", err);
+    showWarning(`Error loading database schema: ${err.message}`);
     // Return empty schema as fallback
     return {};
   }
@@ -85,6 +96,10 @@ async function fetchSchema(){
 function showWarning(message) {
   const container = document.getElementById('propertiesContainer');
   if (!container) return;
+  
+  // Remove any existing warnings first
+  const existingWarnings = container.querySelectorAll('.warning-message');
+  existingWarnings.forEach(warning => warning.remove());
   
   const warningDiv = create('div', 
     {className: 'warning-message'}, 
@@ -96,22 +111,47 @@ function showWarning(message) {
   console.warn(message);
 }
 
+// Show error in the UI without alert
+function showError(message) {
+  const errorContainer = document.getElementById('error-container');
+  if (!errorContainer) return;
+  
+  errorContainer.textContent = message;
+  errorContainer.style.display = 'block';
+  
+  // Auto-hide after 5 seconds
+  setTimeout(() => {
+    errorContainer.style.display = 'none';
+  }, 5000);
+}
+
 async function buildForm(){
   try {
-    const schema = await fetchSchema();
+    const schema = await fetchSchema(currentDbType);
     const container = document.getElementById('propertiesContainer');
     container.innerHTML = '';
     
+    // Clear error container
+    const errorContainer = document.getElementById('error-container');
+    if (errorContainer) errorContainer.style.display = 'none';
+    
+    // Update submit button text based on current db type
+    const submitBtn = document.getElementById('submitBtn');
+    if (submitBtn) {
+      submitBtn.textContent = `Create ${currentDbType === 'tasks' ? 'Task' : 'Note'}`;
+    }
+    
     // If schema is empty, show warning but still allow form submission
-    if(Object.keys(schema).length === 0) {
-      showWarning("No database properties found. Only the title field will be available.");
+    if(!schema || Object.keys(schema).length === 0) {
+      showWarning(`No ${currentDbType} database properties found. Only the title field will be available.`);
+      return;
     }
     
     for(const [key,cfg] of Object.entries(schema)){
-      // Skip title and button properties
-      if(cfg.type === 'title' || cfg.type === 'button') continue;
+      // Skip title, button, and unsupported properties
+      if(cfg.type === 'title' || cfg.type === 'button' || cfg.type === 'unsupported') continue;
       
-      // Skip properties with "button" in their name
+      // Skip properties with "button" in their name to avoid potential issues
       if(key.toLowerCase().includes('button')) continue;
       
       // Get renderer for this property type or default to text input
@@ -127,13 +167,19 @@ async function buildForm(){
     }
   } catch(err) {
     console.error("Error building form:", err);
-    showWarning("Error loading database properties. You can still submit with just a title.");
+    showWarning(`Error loading ${currentDbType} database properties. You can still submit with just a title.`);
   }
 }
 
 async function handleSubmit(e){
-  e.preventDefault(); if(submitting) return;
+  e.preventDefault(); 
+  if(submitting) return;
+  
   submitting = true;
+  
+  // Clear any previous errors
+  const errorContainer = document.getElementById('error-container');
+  if (errorContainer) errorContainer.style.display = 'none';
   
   const btn = e.target.querySelector('#submitBtn');
   const originalText = btn.textContent;
@@ -141,7 +187,7 @@ async function handleSubmit(e){
   btn.innerHTML = '<span class="loading-spinner"></span> Submitting...';
   
   try{
-    const schema = await fetchSchema();
+    const schema = await fetchSchema(currentDbType);
     const form = new FormData(e.target);
     const props = {};
     
@@ -155,51 +201,70 @@ async function handleSubmit(e){
     for(const [k,v] of form){
       if(k === 'taskTitle') continue;
       
+      // If no schema or property not in schema, skip
+      if(!schema || !schema[k]) continue;
+      
       const type = schema[k]?.type;
       
-      // Skip button properties
-      if(type === 'button' || (k.toLowerCase && k.toLowerCase().includes('button'))) {
+      // Skip button properties and properties with button in name
+      if(type === 'button' || type === 'unsupported' || 
+         (k.toLowerCase && k.toLowerCase().includes('button'))) {
         continue;
       }
       
-      if(type === 'checkbox') {
-        props[k] = e.target[k].checked;
-      } else if(type === 'multi_select') {
-        const values = form.getAll(k);
-        if(values.length > 0) {
-          props[k] = values;
-        }
-      } else if(v) {
-        props[k] = v;
+      // Handle different property types
+      switch(type) {
+        case 'checkbox':
+          props[k] = e.target[k].checked;
+          break;
+        case 'multi_select':
+          const values = form.getAll(k);
+          if(values.length > 0) {
+            // If it's a text input (no options in schema), split by comma
+            if(values.length === 1 && values[0].includes(',')) {
+              props[k] = values[0].split(',').map(v => v.trim()).filter(v => v);
+            } else {
+              props[k] = values;
+            }
+          }
+          break;
+        case 'number':
+          if(v) props[k] = parseFloat(v);
+          break;
+        default:
+          if(v) props[k] = v;
       }
     }
     
     const payload = {title: title.trim(), properties: props};
-    const res = await fetch('/notion/mini-app/api/tasks?db_type=tasks', {
+    console.log("Submitting data:", payload);
+    
+    const res = await fetch(`/notion/mini-app/api/tasks?db_type=${currentDbType}`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload)
     });
     
+    const responseData = await res.json();
+    
     if(!res.ok) {
-      const errorData = await res.json();
-      throw Error(errorData?.message || errorData?.error || 'Server error');
+      throw Error(responseData?.message || responseData?.error || 'Server error');
     }
     
     // Success!
-    alert('Task created successfully!');
+    showError(`${currentDbType === 'tasks' ? 'Task' : 'Note'} created successfully!`);
     e.target.reset();
     
     // Close Telegram mini app if available
     if(tg) {
-      setTimeout(() => tg.close(), 1000);
+      setTimeout(() => tg.close(), 1500);
     }
   } catch(err) {
     // Handle button property errors with a more specific message
     if(err.message && (err.message.includes('button') || err.message.includes('unsupported property type'))) {
-      alert('Error: The database contains button properties that are not supported. Your task was not saved.');
+      showError(`Error: The database contains button properties that are not supported. Your item was not saved.`);
     } else {
-      alert('Error: ' + err.message);
+      showError('Error: ' + err.message);
     }
   } finally {
     btn.disabled = false;
@@ -208,7 +273,71 @@ async function handleSubmit(e){
   }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  buildForm();
+// Setup tab switching
+function setupTabs() {
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', async function() {
+      if (submitting) return; // Don't switch tabs during submission
+      
+      // Update active tab
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      this.classList.add('active');
+      
+      // Get and store database type
+      currentDbType = this.getAttribute('data-db-type');
+      console.log(`Switched to ${currentDbType} database`);
+      
+      // Rebuild form for this database type
+      await buildForm();
+    });
+  });
+}
+
+// Check database availability from config
+async function checkDatabaseAvailability() {
+  try {
+    const response = await fetch('/notion/mini-app/api/config');
+    if (!response.ok) return;
+    
+    const config = await response.json();
+    
+    // Hide notes tab if not available
+    if (config.HAS_NOTES_DB !== "true") {
+      const notesTab = document.getElementById('notesTab');
+      if (notesTab) notesTab.style.display = 'none';
+    }
+    
+    // Hide tasks tab if not available
+    if (config.HAS_TASKS_DB !== "true") {
+      const tasksTab = document.getElementById('tasksTab');
+      if (tasksTab) tasksTab.style.display = 'none';
+      
+      // If tasks not available but notes is, switch to notes
+      if (config.HAS_NOTES_DB === "true") {
+        currentDbType = "notes";
+        const notesTab = document.getElementById('notesTab');
+        if (notesTab) {
+          notesTab.classList.add('active');
+          document.getElementById('tasksTab')?.classList.remove('active');
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Error checking database availability:", error);
+    showWarning("Could not check database availability");
+  }
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  // Setup tab switching
+  setupTabs();
+  
+  // Check which databases are available
+  await checkDatabaseAvailability();
+  
+  // Build the initial form
+  await buildForm();
+  
+  // Setup form submission
   document.getElementById('taskForm').addEventListener('submit', handleSubmit);
 });

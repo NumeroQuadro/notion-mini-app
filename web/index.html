@@ -37,17 +37,6 @@
     </div>
     <script src="app.js"></script>
     <script>
-        // Test button to check if the config endpoint is working
-        document.getElementById('testConfigBtn').addEventListener('click', async function() {
-            try {
-                const response = await fetch('/notion/mini-app/api/config');
-                const data = await response.json();
-                alert('Config loaded successfully: ' + JSON.stringify(data, null, 2));
-            } catch (error) {
-                alert('Error loading config: ' + error.message);
-            }
-        });
-        
         // Detect if running in Telegram WebApp
         if (window.Telegram && window.Telegram.WebApp) {
             document.body.classList.add('telegram-app');
@@ -57,9 +46,6 @@
             document.documentElement.style.setProperty('--tg-theme-text-color', window.Telegram.WebApp.textColor || '#000000');
             document.documentElement.style.setProperty('--tg-theme-button-color', window.Telegram.WebApp.buttonColor || '#2481cc');
             document.documentElement.style.setProperty('--tg-theme-button-text-color', window.Telegram.WebApp.buttonTextColor || '#ffffff');
-            
-            // Hide test button in Telegram app
-            document.getElementById('testConfigBtn').style.display = 'none';
         }
     </script>
 </body>
