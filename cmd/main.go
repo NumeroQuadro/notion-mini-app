@@ -99,6 +99,7 @@ func serveStaticFiles() {
 	http.HandleFunc("/notion/mini-app/api/tasks", handleTasks)
 	http.HandleFunc("/notion/mini-app/api/properties", handleProperties)
 	http.HandleFunc("/notion/mini-app/api/log", handleLogs)
+	http.HandleFunc("/notion/mini-app/api/recent-tasks", handleRecentTasks)
 
 	// Simple config endpoint that returns environment variables as JSON
 	http.HandleFunc("/notion/mini-app/api/config", handleConfig)
@@ -549,4 +550,64 @@ func handleDebugTask(w http.ResponseWriter, r *http.Request) {
 		"status":  "success",
 		"message": "Debug task created successfully",
 	})
+}
+
+// Handler for fetching recent tasks with filtering
+func handleRecentTasks(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Recent tasks API called from: %s", r.RemoteAddr)
+
+	// Set CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Handle preflight OPTIONS request
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Set content type for the response
+	w.Header().Set("Content-Type", "application/json")
+
+	// Helper function for error responses
+	sendJSONError := func(statusCode int, message string) {
+		w.WriteHeader(statusCode)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": message,
+		})
+	}
+
+	// Only process GET requests
+	if r.Method != http.MethodGet {
+		sendJSONError(http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// Get database type from query param or default to "tasks"
+	dbType := r.URL.Query().Get("db_type")
+	if dbType == "" {
+		dbType = "tasks"
+	}
+
+	// Initialize Notion client
+	notionClient := notion.NewClient()
+
+	// Create a context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// Get the recent tasks
+	tasks, err := notionClient.GetRecentTasks(ctx, dbType, 10)
+	if err != nil {
+		log.Printf("Error getting recent tasks: %v", err)
+		sendJSONError(http.StatusInternalServerError, fmt.Sprintf("Failed to get recent tasks: %v", err))
+		return
+	}
+
+	// Return tasks as JSON
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(tasks); err != nil {
+		log.Printf("Error encoding recent tasks: %v", err)
+	}
 }

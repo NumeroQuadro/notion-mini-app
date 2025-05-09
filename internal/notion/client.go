@@ -34,6 +34,15 @@ func (p ButtonPropertyConfig) GetType() notionapi.PropertyConfigType {
 	return p.Type
 }
 
+// Task represents a simplified Notion database item
+type Task struct {
+	ID         string                 `json:"id"`
+	Title      string                 `json:"title"`
+	URL        string                 `json:"url"`
+	CreatedAt  time.Time              `json:"created_at"`
+	Properties map[string]interface{} `json:"properties"`
+}
+
 type Client struct {
 	client        *notionapi.Client
 	taskDbID      string
@@ -596,4 +605,212 @@ func formatDateString(date string) string {
 	// For other formats, just return the original and log a warning
 	log.Printf("Warning: Unrecognized date format: %s", date)
 	return date
+}
+
+// GetRecentTasks retrieves recent tasks from the specified Notion database
+// with filtering for:
+// - tasks should not have status "done"
+// - tasks should have empty Date
+// - tasks should not contain tag "sometimes-later"
+func (c *Client) GetRecentTasks(ctx context.Context, dbType string, limit int) ([]Task, error) {
+	dbID := c.getDbIDForType(dbType)
+	if dbID == "" {
+		return nil, fmt.Errorf("database ID for %s not configured", dbType)
+	}
+
+	// Create database query filter
+	filter := &notionapi.DatabaseQueryRequest{
+		Filter: &notionapi.CompoundFilter{
+			And: []notionapi.Filter{
+				// Filter for status not being "done"
+				notionapi.PropertyFilter{
+					Property: "status",
+					Select: &notionapi.SelectFilterCondition{
+						DoesNotEqual: "done",
+					},
+				},
+				// Filter for empty Date
+				notionapi.PropertyFilter{
+					Property: "Date",
+					Date: &notionapi.DateFilterCondition{
+						IsEmpty: true,
+					},
+				},
+				// Filter for tags not containing "sometimes-later"
+				notionapi.PropertyFilter{
+					Property: "Tags",
+					MultiSelect: &notionapi.MultiSelectFilterCondition{
+						DoesNotContain: "sometimes-later",
+					},
+				},
+			},
+		},
+		Sorts: []notionapi.SortObject{
+			{
+				Property:  "Created time",
+				Direction: "descending",
+			},
+		},
+		PageSize: limit,
+	}
+
+	// Query the database
+	response, err := c.client.Database.Query(ctx, notionapi.DatabaseID(dbID), filter)
+	if err != nil {
+		// Handle button property error gracefully
+		if strings.Contains(err.Error(), "unsupported property type: button") {
+			log.Printf("Warning: Button property detected during query. Using workaround...")
+			return c.getRecentTasksWithButtonWorkaround(ctx, dbID, limit)
+		}
+		return nil, fmt.Errorf("failed to query database: %w", err)
+	}
+
+	// Transform the results
+	tasks := make([]Task, 0, len(response.Results))
+	for _, page := range response.Results {
+		task, err := c.transformPageToTask(page)
+		if err != nil {
+			log.Printf("Warning: Could not transform page %s: %v", page.ID, err)
+			continue
+		}
+		tasks = append(tasks, task)
+	}
+
+	return tasks, nil
+}
+
+// transformPageToTask converts a Notion page to a Task struct
+func (c *Client) transformPageToTask(page notionapi.Page) (Task, error) {
+	task := Task{
+		ID:         string(page.ID),
+		URL:        page.URL,
+		CreatedAt:  *page.CreatedTime,
+		Properties: make(map[string]interface{}),
+	}
+
+	// Extract title from Name property
+	if titleProp, ok := page.Properties["Name"]; ok {
+		if title, ok := titleProp.(*notionapi.TitleProperty); ok && len(title.Title) > 0 {
+			task.Title = title.Title[0].PlainText
+		}
+	}
+
+	// Add other properties
+	for key, prop := range page.Properties {
+		if key == "Name" {
+			continue // Already handled above
+		}
+
+		// Skip button properties
+		if prop.GetType() == "button" {
+			continue
+		}
+
+		switch prop.GetType() {
+		case "select":
+			if selectProp, ok := prop.(*notionapi.SelectProperty); ok && selectProp.Select.Name != "" {
+				task.Properties[key] = selectProp.Select.Name
+			}
+		case "multi_select":
+			if multiSelectProp, ok := prop.(*notionapi.MultiSelectProperty); ok {
+				tags := make([]string, 0, len(multiSelectProp.MultiSelect))
+				for _, opt := range multiSelectProp.MultiSelect {
+					tags = append(tags, opt.Name)
+				}
+				task.Properties[key] = tags
+			}
+		case "date":
+			if dateProp, ok := prop.(*notionapi.DateProperty); ok && dateProp.Date != nil {
+				task.Properties[key] = dateProp.Date.Start.String()
+			}
+		case "checkbox":
+			if checkboxProp, ok := prop.(*notionapi.CheckboxProperty); ok {
+				task.Properties[key] = checkboxProp.Checkbox
+			}
+		case "rich_text":
+			if textProp, ok := prop.(*notionapi.RichTextProperty); ok && len(textProp.RichText) > 0 {
+				var text strings.Builder
+				for _, t := range textProp.RichText {
+					text.WriteString(t.PlainText)
+				}
+				task.Properties[key] = text.String()
+			}
+		default:
+			// Skip other property types
+		}
+	}
+
+	return task, nil
+}
+
+// getRecentTasksWithButtonWorkaround provides a fallback method for querying databases with button properties
+func (c *Client) getRecentTasksWithButtonWorkaround(ctx context.Context, dbID string, limit int) ([]Task, error) {
+	// Simple query without filters to get recent tasks
+	queryRequest := &notionapi.DatabaseQueryRequest{
+		Sorts: []notionapi.SortObject{
+			{
+				Property:  "Created time",
+				Direction: "descending",
+			},
+		},
+		PageSize: 100, // Get more to allow for manual filtering
+	}
+
+	response, err := c.client.Database.Query(ctx, notionapi.DatabaseID(dbID), queryRequest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query database: %w", err)
+	}
+
+	// Manual filtering
+	tasks := make([]Task, 0, limit)
+	for _, page := range response.Results {
+		// Skip if we already have enough tasks
+		if len(tasks) >= limit {
+			break
+		}
+
+		// Check status property
+		if statusProp, ok := page.Properties["status"]; ok {
+			if selectProp, ok := statusProp.(*notionapi.SelectProperty); ok {
+				if selectProp.Select.Name == "done" {
+					continue // Skip if status is done
+				}
+			}
+		}
+
+		// Check Date property
+		if dateProp, ok := page.Properties["Date"]; ok {
+			if dateValue, ok := dateProp.(*notionapi.DateProperty); ok {
+				if dateValue.Date != nil && dateValue.Date.Start != nil {
+					continue // Skip if date is not empty
+				}
+			}
+		}
+
+		// Check Tags property
+		if tagsProp, ok := page.Properties["Tags"]; ok {
+			if multiSelectProp, ok := tagsProp.(*notionapi.MultiSelectProperty); ok {
+				hasSometimesLater := false
+				for _, tag := range multiSelectProp.MultiSelect {
+					if tag.Name == "sometimes-later" {
+						hasSometimesLater = true
+						break
+					}
+				}
+				if hasSometimesLater {
+					continue // Skip if has sometimes-later tag
+				}
+			}
+		}
+
+		// If we got here, the task passed all filters
+		task, err := c.transformPageToTask(page)
+		if err != nil {
+			log.Printf("Warning: Could not transform page %s: %v", page.ID, err)
+			continue
+		}
+		tasks = append(tasks, task)
+	}
+
+	return tasks, nil
 }
