@@ -29,6 +29,14 @@ func main() {
 		log.Fatal("TELEGRAM_BOT_TOKEN environment variable is not set")
 	}
 
+	// Get authorized user ID
+	authorizedUserID := os.Getenv("AUTHORIZED_USER_ID")
+	if authorizedUserID == "" {
+		log.Printf("Warning: AUTHORIZED_USER_ID not set, bot will be accessible to anyone")
+	} else {
+		log.Printf("Bot will be restricted to user ID: %s", authorizedUserID)
+	}
+
 	// Get mini app URL
 	miniAppURL := os.Getenv("MINI_APP_URL")
 	if miniAppURL == "" {
