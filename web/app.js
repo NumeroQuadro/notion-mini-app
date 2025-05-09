@@ -1,4 +1,3 @@
-// app.js — Notion mini-app script with improved button property handling
 const tg = window.Telegram?.WebApp;
 if(tg) tg.expand();
 
@@ -111,13 +110,21 @@ function showWarning(message) {
   console.warn(message);
 }
 
-// Show error in the UI without alert
-function showError(message) {
+// Show message in the UI - can be used for both errors and success messages
+function showMessage(message, isError = true) {
   const errorContainer = document.getElementById('error-container');
   if (!errorContainer) return;
   
   errorContainer.textContent = message;
   errorContainer.style.display = 'block';
+  
+  if (isError) {
+    errorContainer.classList.add('error-message');
+    errorContainer.classList.remove('success-message');
+  } else {
+    errorContainer.classList.add('success-message');
+    errorContainer.classList.remove('error-message');
+  }
   
   // Auto-hide after 5 seconds
   setTimeout(() => {
@@ -154,6 +161,9 @@ async function buildForm(){
       // Skip properties with "button" in their name to avoid potential issues
       if(key.toLowerCase().includes('button')) continue;
       
+      // Skip the "Description" property since we already have a dedicated field for it
+      if(key.toLowerCase() === 'description') continue;
+      
       // Get renderer for this property type or default to text input
       const render = renderers[cfg.type] || renderers.text;
       const field = render(key, cfg);
@@ -177,7 +187,7 @@ async function handleSubmit(e){
   
   submitting = true;
   
-  // Clear any previous errors
+  // Clear any previous messages
   const errorContainer = document.getElementById('error-container');
   if (errorContainer) errorContainer.style.display = 'none';
   
@@ -197,9 +207,16 @@ async function handleSubmit(e){
       throw Error("Title is required");
     }
     
+    // Get description field
+    const description = form.get('description');
+    if(description && description.trim()) {
+      // Add description as a property
+      props["Description"] = description.trim();
+    }
+    
     // Process form data according to schema types
     for(const [k,v] of form){
-      if(k === 'taskTitle') continue;
+      if(k === 'taskTitle' || k === 'description') continue;
       
       // If no schema or property not in schema, skip
       if(!schema || !schema[k]) continue;
@@ -252,7 +269,7 @@ async function handleSubmit(e){
     }
     
     // Success!
-    showError(`${currentDbType === 'tasks' ? 'Task' : 'Note'} created successfully!`);
+    showMessage(`${currentDbType === 'tasks' ? 'Task' : 'Note'} created successfully!`, false);
     e.target.reset();
     
     // Close Telegram mini app if available
@@ -262,9 +279,9 @@ async function handleSubmit(e){
   } catch(err) {
     // Handle button property errors with a more specific message
     if(err.message && (err.message.includes('button') || err.message.includes('unsupported property type'))) {
-      showError(`Error: The database contains button properties that are not supported. Your item was not saved.`);
+      showMessage(`Error: The database contains button properties that are not supported. Your item was not saved.`, true);
     } else {
-      showError('Error: ' + err.message);
+      showMessage('Error: ' + err.message, true);
     }
   } finally {
     btn.disabled = false;

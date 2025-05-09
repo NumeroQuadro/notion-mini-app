@@ -6,6 +6,7 @@ A Telegram mini app that allows users to create and manage tasks in Notion datab
 
 - Create new tasks in Notion databases
 - Set custom properties for tasks
+- Add detailed descriptions for tasks and notes
 - View and manage existing tasks
 - Seamless integration with Telegram
 - Support for multiple database types (tasks and notes)
