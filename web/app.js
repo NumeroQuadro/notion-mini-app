@@ -115,6 +115,11 @@ function showMessage(message, isError = true) {
   const errorContainer = document.getElementById('error-container');
   if (!errorContainer) return;
   
+  // Format API errors to be more user-friendly
+  if (isError && message.includes("Notion API error")) {
+    message = "There was an error saving to Notion. Please try again or contact support.";
+  }
+  
   errorContainer.textContent = message;
   errorContainer.style.display = 'block';
   
@@ -256,27 +261,39 @@ async function handleSubmit(e){
     const payload = {title: title.trim(), properties: props};
     console.log("Submitting data:", payload);
     
-    const res = await fetch(`/notion/mini-app/api/tasks?db_type=${currentDbType}`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload)
-    });
-    
-    const responseData = await res.json();
-    
-    if(!res.ok) {
-      throw Error(responseData?.message || responseData?.error || 'Server error');
-    }
-    
-    // Success!
-    showMessage(`${currentDbType === 'tasks' ? 'Task' : 'Note'} created successfully!`, false);
-    e.target.reset();
-    
-    // Close Telegram mini app if available
-    if(tg) {
-      setTimeout(() => tg.close(), 1500);
+    try {
+      const res = await fetch(`/notion/mini-app/api/tasks?db_type=${currentDbType}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      
+      const responseData = await res.json();
+      
+      if(!res.ok) {
+        console.error("Server error:", responseData);
+        throw Error(responseData?.message || responseData?.error || 'Server error');
+      }
+      
+      // Success!
+      showMessage(`${currentDbType === 'tasks' ? 'Task' : 'Note'} created successfully!`, false);
+      e.target.reset();
+      
+      // Close Telegram mini app if available
+      if(tg) {
+        setTimeout(() => tg.close(), 1500);
+      }
+    } catch (apiError) {
+      console.error("API error:", apiError);
+      // Show a more user-friendly message for API errors
+      if (apiError.message && apiError.message.includes("validation")) {
+        showMessage("The description might be too long or contain unsupported formatting. Try simplifying it.", true);
+      } else {
+        showMessage('Error: ' + apiError.message, true);
+      }
     }
   } catch(err) {
+    console.error("Form error:", err);
     // Handle button property errors with a more specific message
     if(err.message && (err.message.includes('button') || err.message.includes('unsupported property type'))) {
       showMessage(`Error: The database contains button properties that are not supported. Your item was not saved.`, true);
