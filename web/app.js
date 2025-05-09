@@ -346,6 +346,11 @@ function setupTileNavigation() {
         return;
       }
       
+      if (tile.dataset.action === 'projects') {
+        navigateTo('projects');
+        return;
+      }
+      
       // Handle database tiles
       if (tile.dataset.dbType) {
         currentDbType = tile.dataset.dbType;
@@ -368,6 +373,7 @@ function navigateTo(section) {
   document.getElementById('home-screen').style.display = 'none';
   document.getElementById('formSection').style.display = 'none';
   document.getElementById('recentTasksSection').style.display = 'none';
+  document.getElementById('projectsSection').style.display = 'none';
   
   // Show back button for non-home sections
   document.getElementById('back-button').style.display = section === 'home' ? 'none' : 'block';
@@ -384,6 +390,10 @@ function navigateTo(section) {
     case 'recent-tasks':
       document.getElementById('recentTasksSection').style.display = 'block';
       loadRecentTasks();
+      break;
+    case 'projects':
+      document.getElementById('projectsSection').style.display = 'block';
+      loadProjects();
       break;
   }
 }
@@ -555,10 +565,123 @@ async function checkDatabaseAvailability() {
     if (config.HAS_JOURNAL_DB !== "true") {
       const journalTile = document.querySelector('.journal-tile');
       if (journalTile) journalTile.style.display = 'none';
-        }
-    } catch (error) {
+    }
+    
+    if (config.HAS_PROJECTS_DB !== "true") {
+      const projectsTile = document.querySelector('.projects-tile');
+      if (projectsTile) projectsTile.style.display = 'none';
+    }
+  } catch (error) {
     console.error("Error checking database availability:", error);
     showWarning("Could not check database availability");
+  }
+}
+
+// Fetch and display projects
+async function loadProjects() {
+  const projectsSection = document.getElementById('projectsSection');
+  const projectsContainer = projectsSection.querySelector('.projects-container');
+  projectsContainer.innerHTML = '<div class="loading-indicator">Loading projects...</div>';
+  
+  try {
+    const response = await fetch('/notion/mini-app/api/projects');
+    if (!response.ok) {
+      throw new Error('Failed to fetch projects');
+    }
+    
+    const projects = await response.json();
+    
+    if (projects.length === 0) {
+      projectsContainer.innerHTML = '<div class="no-tasks">No projects found</div>';
+      return;
+    }
+    
+    projectsContainer.innerHTML = '';
+    
+    // Group projects by status
+    const projectsByStatus = {};
+    projects.forEach(project => {
+      const status = project.status || 'No Status';
+      if (!projectsByStatus[status]) {
+        projectsByStatus[status] = [];
+      }
+      projectsByStatus[status].push(project);
+    });
+    
+    // Create columns for each status
+    for (const [status, statusProjects] of Object.entries(projectsByStatus)) {
+      // Determine column class based on status
+      let columnClass = 'status-column';
+      if (status.toLowerCase().includes('not') || status.toLowerCase().includes('todo')) {
+        columnClass += ' not-started';
+      } else if (status.toLowerCase().includes('progress') || status.toLowerCase().includes('doing')) {
+        columnClass += ' in-progress';
+      } else if (status.toLowerCase().includes('done') || status.toLowerCase().includes('complete')) {
+        columnClass += ' done';
+      }
+      
+      const statusColumn = document.createElement('div');
+      statusColumn.className = columnClass;
+      
+      // Create column header
+      const statusHeader = document.createElement('div');
+      statusHeader.className = 'status-header';
+      statusHeader.innerHTML = `
+        <div>${status}</div>
+        <div class="status-count">${statusProjects.length}</div>
+      `;
+      statusColumn.appendChild(statusHeader);
+      
+      // Create project list
+      const projectList = document.createElement('ul');
+      projectList.className = 'project-list';
+      
+      // Add each project to the list
+      statusProjects.forEach(project => {
+        const projectItem = document.createElement('li');
+        projectItem.className = 'project-item';
+        
+        // Create project details
+        let projectHTML = `
+          <div class="project-title">
+            <a href="${project.url}" target="_blank">${project.name || 'Untitled Project'}</a>
+          </div>
+          <div class="project-meta">
+        `;
+        
+        // Add priority if available
+        if (project.priority) {
+          let priorityClass = 'low';
+          if (project.priority.toLowerCase().includes('high')) {
+            priorityClass = 'high';
+          } else if (project.priority.toLowerCase().includes('med')) {
+            priorityClass = 'medium';
+          }
+          
+          projectHTML += `
+            <div class="project-priority ${priorityClass}">${project.priority}</div>
+          `;
+        }
+        
+        // Add end date if available
+        if (project.end_date) {
+          projectHTML += `
+            <div class="project-date">${project.end_date}</div>
+          `;
+        }
+        
+        projectHTML += `</div>`;
+        projectItem.innerHTML = projectHTML;
+        projectList.appendChild(projectItem);
+      });
+      
+      statusColumn.appendChild(projectList);
+      projectsContainer.appendChild(statusColumn);
+    }
+    
+  } catch (error) {
+    console.error('Error loading projects:', error);
+    projectsContainer.innerHTML = `<div class="error-message">Error loading projects: ${error.message}</div>`;
   }
 }
 
