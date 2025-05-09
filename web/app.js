@@ -1,641 +1,214 @@
-// Initialize Telegram WebApp
-const tg = window.Telegram.WebApp;
-tg.expand();
+// public/mini-app.js — concise Notion mini-app script
+const tg = window.Telegram?.WebApp;
+if(tg) tg.expand();
 
-// Current database type
-let currentDbType = "tasks";
-let propertiesCache = {};
-let isSubmitting = false;
+// Cache and state
+let schemaCache = {};
+let submitting = false;
 
-// Known checkbox property names - centralized list
-const CHECKBOX_PROPERTIES = ['complete', 'status', 'done', 'complete'];
+// Renderers for different property types
+const renderers = {
+  title:        () => null,
+  text:         (k,c) => create('input',{type:'text',id:k,name:k,required:c.required}),
+  date:         (k,c) => create('input',{type:'date',id:k,name:k,required:c.required}),
+  select:       (k,c) => selectField(k,c),
+  multi_select: (k,c) => multiSelectField(k,c),
+  checkbox:     (k,c) => create('label',{},
+                 create('input',{type:'checkbox',id:k,name:k}), ' ' + k),
+  number:       (k,c) => create('input',{type:'number',id:k,name:k,required:c.required}),
+  url:          (k,c) => create('input',{type:'url',id:k,name:k,placeholder:'https://',required:c.required}),
+  email:        (k,c) => create('input',{type:'email',id:k,name:k,required:c.required}),
+  phone_number: (k,c) => create('input',{type:'tel',id:k,name:k,required:c.required}),
+  // Explicitly ignore button property type
+  button:       () => null,
+};
 
-// Initialize Notion Client (initialized on demand)
-let notionClient = null;
-let appConfig = null;
-
-// Initialize the app
-document.addEventListener('DOMContentLoaded', async function() {
-    // Set up tab click handlers
-    document.querySelectorAll('.tab').forEach(tab => {
-        tab.addEventListener('click', async function() {
-            if (isSubmitting) return; // Don't switch tabs during submission
-            
-            // Update active tab
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            this.classList.add('active');
-            
-            // Get and store database type
-            currentDbType = this.getAttribute('data-db-type');
-            console.log(`Switched to ${currentDbType} database`);
-            
-            // Load appropriate properties
-            await loadDatabaseProperties();
-        });
-    });
-    
-    // Set up form submission
-    const form = document.getElementById('taskForm');
-    form.addEventListener('submit', handleSubmit);
-    
-    // Initial properties load
-    try {
-        const config = await getAppConfig();
-        
-        // Check if both databases are available
-        if (config.HAS_TASKS_DB !== "true" && config.HAS_NOTES_DB !== "true") {
-            showError("No Notion databases configured. Please check your settings.");
-            return;
-        }
-        
-        // Hide notes tab if not available
-        if (config.HAS_NOTES_DB !== "true") {
-            document.getElementById('notesTab').style.display = 'none';
-        }
-        
-        // Hide tasks tab if not available
-        if (config.HAS_TASKS_DB !== "true") {
-            document.getElementById('tasksTab').style.display = 'none';
-            // If tasks not available but notes is, switch to notes
-            if (config.HAS_NOTES_DB === "true") {
-                document.getElementById('notesTab').click();
-            }
-        }
-        
-        // Load initial properties
-        await loadDatabaseProperties();
-    } catch (error) {
-        showError(`Failed to initialize: ${error.message}`);
-    }
-});
-
-// Fetch application configuration from server
-async function getAppConfig() {
-    if (appConfig) {
-        return appConfig;
-    }
-    
-    try {
-        const response = await fetch('/notion/mini-app/api/config');
-        
-        if (!response.ok) {
-            throw new Error(`Failed to fetch config: ${response.status}`);
-        }
-        
-        appConfig = await response.json();
-        console.log('App config loaded:', appConfig);
-        return appConfig;
-    } catch (error) {
-        console.error('Error loading app config:', error);
-        
-        // Return empty config as fallback
-        appConfig = { _source: 'fallback' };
-        return appConfig;
-    }
+// Helper to create elements
+function create(tag,attrs={},...kids){
+  const e=document.createElement(tag);
+  Object.assign(e,attrs);
+  kids.flat().forEach(c=>e.append(typeof c=='string'?document.createTextNode(c):c));
+  return e;
 }
 
-// Load database properties from the server with caching
-async function loadDatabaseProperties() {
-    try {
-        // Show loading state
-        document.getElementById('propertiesContainer').innerHTML = '<div class="loading-message">Loading properties...</div>';
-        
-        // Check cache first
-        if (propertiesCache[currentDbType]) {
-            createPropertyFields(propertiesCache[currentDbType]);
-            return;
-        }
-        
-        // Fetch properties for the current database type
-        const response = await fetch(`/notion/mini-app/api/properties?db_type=${currentDbType}`);
-        
-        if (!response.ok) {
-            // Try to parse the error as JSON
-            let errorText = '';
-            let isButtonError = false;
-            
-            try {
-                const errorData = await response.json();
-                errorText = errorData.error || `Status code: ${response.status}`;
-                
-                // Check if it's a button property error
-                isButtonError = errorText.includes('button') || errorText.includes('unsupported property type');
-                
-                if (isButtonError) {
-                    // Show a warning but continue
-                    showWarning("Database contains button properties which are not supported. Some properties may not be shown, but you can still create items.");
-                    
-                    // If error response contains properties, use them
-                    if (errorData.properties) {
-                        createPropertyFields(errorData.properties);
-                        return;
-                    }
-                }
-            } catch (e) {
-                errorText = await response.text();
-            }
-            
-            // For button errors, try to continue with empty properties
-            if (isButtonError) {
-                // Use empty properties
-                propertiesCache[currentDbType] = {};
-                createPropertyFields({});
-                return;
-            }
-            
-            throw new Error(`API returned ${response.status}: ${errorText}`);
-        }
-        
-        const properties = await response.json();
-        console.log(`Properties fetched for ${currentDbType}:`, properties);
-        
-        // Cache the properties
-        propertiesCache[currentDbType] = properties;
-        
-        // Check if we have properties to show
-        if (Object.keys(properties).length === 0) {
-            showWarning(`No properties found for ${currentDbType} database. You can still create items with just a title.`);
-        }
-        
-        // Create form fields for the properties
-        createPropertyFields(properties);
-    } catch (error) {
-        console.error('Error fetching properties:', error);
-        
-        // Check if it's a button property error
-        if (error.message && (error.message.includes('button') || error.message.includes('unsupported property type'))) {
-            // Show warning but allow the form to be used
-            showWarning("Database contains button properties which are not supported. Only the title field will be available, but you can still create items.");
-            createPropertyFields({});
+function selectField(key, cfg) {
+  const sel = create('select',{id:key,name:key,required:cfg.required}, create('option',{value:''},'--Select--'));
+  cfg.options.forEach(o=> sel.append(create('option',{value:o},o)));
+  return sel;
+}
+
+function multiSelectField(key,cfg){
+  // large lists on mobile get a multi-select dropdown
+  if(cfg.options.length>5 && /Mobi/i.test(navigator.userAgent)){
+    const sel=create('select',{id:key,name:key,multiple:true});
+    cfg.options.forEach(o=> sel.append(create('option',{value:o},o)));
+    return sel;
+  }
+  // else checkbox list
+  return cfg.options.map(o=>
+    create('label',{},
+      create('input',{type:'checkbox',name:key,value:o}), ' '+o
+    )
+  );
+}
+
+async function fetchSchema(){
+  try {
+    if(!schemaCache.tasks){
+      const r=await fetch('/notion/mini-app/api/properties?db_type=tasks');
+      if(!r.ok) {
+        // Try to get properties even from an error response
+        const data = await r.json();
+        if (data && data.properties) {
+          schemaCache.tasks = data.properties;
+          
+          // Show warning if we have an error message but still got properties
+          if(data.error && data.error.includes('button')) {
+            showWarning("Some button properties in the database are skipped");
+          }
         } else {
-            // Show the error message
-            document.getElementById('propertiesContainer').innerHTML = 
-                `<div class="error-message">Failed to load database properties: ${error.message}</div>`;
+          throw Error(data?.error || r.statusText);
         }
+      } else {
+        schemaCache.tasks = await r.json();
+      }
     }
-}
-
-// Create form fields based on Notion properties
-function createPropertyFields(properties) {
-    const container = document.getElementById('propertiesContainer');
-    
-    // Clear container first
-    container.innerHTML = '';
-
-    // Check if we're on a mobile device
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || 
-                    (window.Telegram && window.Telegram.WebApp);
-    
-    // Create fields for each property
-    for (const [key, config] of Object.entries(properties)) {
-        // Skip the 'Name' property since we already have a title field
-        if (key === 'Name' || key === 'title' || config.type === 'title') {
-            continue;
-        }
-        
-        // Skip button properties and button-like properties
-        if (config.type === 'button' || 
-            key.toLowerCase().includes('button') || 
-            key.toLowerCase().includes('submit') || 
-            key.toLowerCase().includes('action')) {
-            console.log(`Skipping button property: ${key}`);
-            continue;
-        }
-
-        const formGroup = document.createElement('div');
-        formGroup.className = 'form-group';
-
-        const label = document.createElement('label');
-        label.htmlFor = key;
-        label.textContent = key;
-        if (config.required) {
-            const required = document.createElement('span');
-            required.textContent = ' *';
-            required.style.color = 'red';
-            label.appendChild(required);
-        }
-
-        let input;
-        switch (config.type) {
-            case 'multi_select':
-                // Create checkboxes for multi-select
-                const checkboxContainer = document.createElement('div');
-                checkboxContainer.className = 'checkbox-group';
-                
-                if (config.options && config.options.length > 0) {
-                    // On mobile, if there are many options, use a select with multiple instead
-                    if (isMobile && config.options.length > 5) {
-                        const select = document.createElement('select');
-                        select.multiple = true;
-                        select.id = key;
-                        select.name = key;
-                        select.dataset.type = 'multi_select';
-                        select.dataset.propName = key;
-                        
-                        // Add a helper text
-                        const helpText = document.createElement('div');
-                        helpText.className = 'help-text';
-                        helpText.textContent = 'Tap multiple items to select them';
-                        helpText.style.fontSize = '12px';
-                        helpText.style.color = '#666';
-                        helpText.style.marginBottom = '5px';
-                        
-                        checkboxContainer.appendChild(helpText);
-                        
-                        config.options.forEach(option => {
-                            const optionElement = document.createElement('option');
-                            optionElement.value = option;
-                            optionElement.textContent = option;
-                            select.appendChild(optionElement);
-                        });
-                        
-                        input = select;
-                    } else {
-                        // Create checkboxes for desktop or few options
-                        config.options.forEach(option => {
-                            const checkboxWrapper = document.createElement('div');
-                            checkboxWrapper.className = 'checkbox-wrapper';
-                            
-                            const checkbox = document.createElement('input');
-                            checkbox.type = 'checkbox';
-                            checkbox.id = `${key}-${option}`;
-                            checkbox.name = key;
-                            checkbox.value = option;
-                            checkbox.dataset.type = 'multi_select';
-                            checkbox.dataset.propName = key;
-                            
-                            const checkboxLabel = document.createElement('label');
-                            checkboxLabel.htmlFor = `${key}-${option}`;
-                            checkboxLabel.textContent = option;
-                            
-                            checkboxWrapper.appendChild(checkbox);
-                            checkboxWrapper.appendChild(checkboxLabel);
-                            checkboxContainer.appendChild(checkboxWrapper);
-                        });
-                        
-                        input = checkboxContainer;
-                    }
-                } else {
-                    // If no options, use a text input with placeholder for tag entry
-                    input = document.createElement('input');
-                    input.type = 'text';
-                    input.id = key;
-                    input.name = key;
-                    input.placeholder = 'Enter tags separated by commas';
-                    input.dataset.type = 'multi_select_text';
-                    input.dataset.propName = key;
-                }
-                break;
-                
-            case 'select':
-                // Create dropdown for select
-                input = document.createElement('select');
-                input.id = key;
-                input.name = key;
-                input.dataset.type = 'select';
-                input.dataset.propName = key;
-                
-                // Add empty option
-                const emptyOption = document.createElement('option');
-                emptyOption.value = '';
-                emptyOption.textContent = '-- Select an option --';
-                input.appendChild(emptyOption);
-                
-                // Add options
-                if (config.options) {
-                    config.options.forEach(option => {
-                        const optionElement = document.createElement('option');
-                        optionElement.value = option;
-                        optionElement.textContent = option;
-                        input.appendChild(optionElement);
-                    });
-                }
-                break;
-                
-            case 'date':
-                // Date input
-                input = document.createElement('input');
-                input.type = 'date';
-                input.id = key;
-                input.name = key;
-                input.dataset.type = 'date';
-                input.dataset.propName = key;
-                break;
-                
-            case 'checkbox':
-                // Checkbox input
-                const checkboxDiv = document.createElement('div');
-                checkboxDiv.className = 'checkbox-single';
-                
-                const checkbox = document.createElement('input');
-                checkbox.type = 'checkbox';
-                checkbox.id = key;
-                checkbox.name = key;
-                checkbox.dataset.type = 'checkbox';
-                checkbox.dataset.propName = key;
-                
-                const checkboxLabel = document.createElement('label');
-                checkboxLabel.htmlFor = key;
-                checkboxLabel.textContent = 'Yes';
-                
-                checkboxDiv.appendChild(checkbox);
-                checkboxDiv.appendChild(checkboxLabel);
-                
-                input = checkboxDiv;
-                break;
-                
-            case 'number':
-                // Number input
-                input = document.createElement('input');
-                input.type = 'number';
-                input.id = key;
-                input.name = key;
-                input.dataset.type = 'number';
-                input.dataset.propName = key;
-                break;
-                
-            case 'url':
-                // URL input
-                input = document.createElement('input');
-                input.type = 'url';
-                input.id = key;
-                input.name = key;
-                input.placeholder = 'https://';
-                input.dataset.type = 'url';
-                input.dataset.propName = key;
-                break;
-                
-            case 'email':
-                // Email input
-                input = document.createElement('input');
-                input.type = 'email';
-                input.id = key;
-                input.name = key;
-                input.dataset.type = 'email';
-                input.dataset.propName = key;
-                break;
-                
-            case 'phone_number':
-                // Phone input
-                input = document.createElement('input');
-                input.type = 'tel';
-                input.id = key;
-                input.name = key;
-                input.dataset.type = 'phone';
-                input.dataset.propName = key;
-                break;
-                
-            default:
-                // Default to text input for unrecognized types
-                input = document.createElement('input');
-                input.type = 'text';
-                input.id = key;
-                input.name = key;
-                input.dataset.type = 'text';
-                input.dataset.propName = key;
-                break;
-        }
-        
-        // Add input to form group
-        formGroup.appendChild(label);
-        
-        // If input is not a DOM element (like for checkbox groups), handle differently
-        if (input instanceof HTMLElement) {
-            formGroup.appendChild(input);
-        } else {
-            formGroup.appendChild(input);
-        }
-        
-        // Add form group to container
-        container.appendChild(formGroup);
-    }
-}
-
-// Convert form data to the format expected by Notion API
-function convertToNotionProperties(formData) {
-    const result = {};
-    
-    // Process each form field
-    for (const [key, value] of formData.entries()) {
-        // Skip empty fields
-        if (!value && value !== false) continue;
-        
-        // Get property type from dataset
-        const input = document.querySelector(`[name="${key}"]`);
-        if (!input) continue;
-        
-        const type = input.dataset.type;
-        const propName = input.dataset.propName || key;
-        
-        // Process based on property type
-        switch (type) {
-            case 'multi_select':
-                // Handle multi-select from select element
-                if (input.tagName === 'SELECT' && input.multiple) {
-                    const selected = Array.from(input.selectedOptions).map(opt => opt.value);
-                    if (selected.length > 0) {
-                        if (!result[propName]) result[propName] = [];
-                        result[propName] = selected;
-                    }
-                }
-                // For checkboxes, we need to collect all with the same name
-                else if (input.type === 'checkbox') {
-                    const checkboxes = document.querySelectorAll(`input[name="${key}"]:checked`);
-                    if (checkboxes.length > 0) {
-                        if (!result[propName]) result[propName] = [];
-                        checkboxes.forEach(cb => {
-                            result[propName].push(cb.value);
-                        });
-                    }
-                }
-                break;
-                
-            case 'multi_select_text':
-                // Handle multi-select from text input (comma-separated)
-                if (value) {
-                    const tags = value.split(',').map(tag => tag.trim()).filter(tag => tag);
-                    if (tags.length > 0) {
-                        result[propName] = tags;
-                    }
-                }
-                break;
-                
-            case 'select':
-                // Handle select dropdown
-                if (value) {
-                    result[propName] = value;
-                }
-                break;
-                
-            case 'date':
-                // Handle date input
-                if (value) {
-                    result[propName] = formatDateForNotion(value);
-                }
-                break;
-                
-            case 'checkbox':
-                // Handle checkbox (convert to boolean)
-                result[propName] = input.checked;
-                break;
-                
-            case 'number':
-                // Handle number input (parse to number)
-                if (value) {
-                    result[propName] = parseFloat(value);
-                }
-                break;
-                
-            default:
-                // Default handling for text and other fields
-                if (value) {
-                    result[propName] = value;
-                }
-                break;
-        }
-    }
-    
-    return result;
-}
-
-// Format date string for Notion API
-function formatDateForNotion(dateStr) {
-    // Match YYYY-MM-DD format for Notion API
-    return dateStr;
-}
-
-// Handle form submission
-async function handleSubmit(event) {
-    event.preventDefault();
-    
-    // Don't allow multiple simultaneous submissions
-    if (isSubmitting) return;
-    
-    try {
-        isSubmitting = true;
-        
-        // Show loading state
-        const submitButton = document.getElementById('submitBtn');
-        const originalButtonText = submitButton.textContent;
-        submitButton.innerHTML = '<span class="loading-spinner"></span> Submitting...';
-        submitButton.classList.add('loading');
-        
-        // Get title
-        const title = document.getElementById('taskTitle').value.trim();
-        if (!title) {
-            throw new Error('Title is required');
-        }
-        
-        // Get form data
-        const formData = new FormData(event.target);
-        
-        // Convert to Notion-friendly format
-        const properties = convertToNotionProperties(formData);
-        
-        // Create task data
-        const taskData = {
-            title: title,
-            properties: properties
-        };
-        
-        console.log(`Creating ${currentDbType} with:`, taskData);
-        
-        // Send to server
-        const response = await fetch(`/notion/mini-app/api/tasks?db_type=${currentDbType}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(taskData)
-        });
-        
-        // Parse the response
-        let data;
-        let errorMessage = '';
-        
-        try {
-            data = await response.json();
-            if (!response.ok) {
-                errorMessage = data.message || `Server error: ${response.status}`;
-                
-                // Check for specific button property errors
-                if (errorMessage.includes('button') || errorMessage.includes('unsupported property type')) {
-                    errorMessage = "Failed to create item due to unsupported button properties in the database. Please contact the app administrator.";
-                }
-                
-                throw new Error(errorMessage);
-            }
-        } catch (jsonError) {
-            if (!response.ok) {
-                throw new Error(`Server error: ${response.status}`);
-            }
-            throw jsonError;
-        }
-        
-        console.log('Item created successfully', data);
-        
-        // Show success message
-        showPopup('Success', `New ${currentDbType === 'tasks' ? 'task' : 'note'} created successfully!`);
-        
-        // Clear the form
-        document.getElementById('taskForm').reset();
-        
-        // If in Telegram WebApp, close after success
-        if (window.Telegram && window.Telegram.WebApp) {
-            // Delay to ensure user sees success message
-            setTimeout(() => {
-                window.Telegram.WebApp.close();
-            }, 1500);
-        }
-    } catch (error) {
-        console.error('Error creating item:', error);
-        showError(error.message || 'Failed to create item');
-    } finally {
-        // Reset submit button
-        const submitButton = document.getElementById('submitBtn');
-        submitButton.textContent = 'Create Item';
-        submitButton.classList.remove('loading');
-        isSubmitting = false;
-    }
-}
-
-// Show error message
-function showError(message) {
-    const errorContainer = document.getElementById('error-container');
-    errorContainer.textContent = message;
-    errorContainer.style.display = 'block';
-    
-    // Hide after 5 seconds
-    setTimeout(() => {
-        errorContainer.style.display = 'none';
-    }, 5000);
-}
-
-// Show popup message
-function showPopup(title, message) {
-    // Check if we have native Telegram popup
-    if (window.Telegram && window.Telegram.WebApp) {
-        window.Telegram.WebApp.showPopup({
-            title: title,
-            message: message,
-            buttons: [{ type: 'ok' }]
-        });
-        return;
-    }
-    
-    // Fallback for browser
-    alert(`${title}: ${message}`);
+    return schemaCache.tasks;
+  } catch(err) {
+    console.error("Error fetching schema:", err);
+    // Return empty schema as fallback
+    return {};
+  }
 }
 
 // Show a warning message that doesn't block usage
 function showWarning(message) {
-    const warningDiv = document.createElement('div');
-    warningDiv.className = 'warning-message';
-    warningDiv.textContent = message;
-    
-    // Insert the warning at the top of the properties container
+  const container = document.getElementById('propertiesContainer');
+  if (!container) return;
+  
+  const warningDiv = create('div', 
+    {className: 'warning-message'}, 
+    message
+  );
+  
+  // Insert warning before the first child
+  container.insertBefore(warningDiv, container.firstChild);
+  console.warn(message);
+}
+
+async function buildForm(){
+  try {
+    const schema = await fetchSchema();
     const container = document.getElementById('propertiesContainer');
-    container.insertBefore(warningDiv, container.firstChild);
+    container.innerHTML = '';
     
-    console.warn(message);
-} 
+    // If schema is empty, show warning but still allow form submission
+    if(Object.keys(schema).length === 0) {
+      showWarning("No database properties found. Only the title field will be available.");
+    }
+    
+    for(const [key,cfg] of Object.entries(schema)){
+      // Skip title and button properties
+      if(cfg.type === 'title' || cfg.type === 'button') continue;
+      
+      // Skip properties with "button" in their name
+      if(key.toLowerCase().includes('button')) continue;
+      
+      // Get renderer for this property type or default to text input
+      const render = renderers[cfg.type] || renderers.text;
+      const field = render(key, cfg);
+      if(!field) continue;
+      
+      const wrapper = create('div', {className: 'form-group'},
+        create('label', {htmlFor: key}, key + (cfg.required ? ' *' : '')),
+        field
+      );
+      container.append(wrapper);
+    }
+  } catch(err) {
+    console.error("Error building form:", err);
+    showWarning("Error loading database properties. You can still submit with just a title.");
+  }
+}
+
+async function handleSubmit(e){
+  e.preventDefault(); if(submitting) return;
+  submitting = true;
+  
+  const btn = e.target.querySelector('#submitBtn');
+  const originalText = btn.textContent;
+  btn.disabled = true; 
+  btn.innerHTML = '<span class="loading-spinner"></span> Submitting...';
+  
+  try{
+    const schema = await fetchSchema();
+    const form = new FormData(e.target);
+    const props = {};
+    
+    // Get title field
+    const title = form.get('taskTitle');
+    if(!title || !title.trim()) {
+      throw Error("Title is required");
+    }
+    
+    // Process form data according to schema types
+    for(const [k,v] of form){
+      if(k === 'taskTitle') continue;
+      
+      const type = schema[k]?.type;
+      
+      // Skip button properties
+      if(type === 'button' || (k.toLowerCase && k.toLowerCase().includes('button'))) {
+        continue;
+      }
+      
+      if(type === 'checkbox') {
+        props[k] = e.target[k].checked;
+      } else if(type === 'multi_select') {
+        const values = form.getAll(k);
+        if(values.length > 0) {
+          props[k] = values;
+        }
+      } else if(v) {
+        props[k] = v;
+      }
+    }
+    
+    const payload = {title: title.trim(), properties: props};
+    const res = await fetch('/notion/mini-app/api/tasks?db_type=tasks', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    
+    if(!res.ok) {
+      const errorData = await res.json();
+      throw Error(errorData?.message || errorData?.error || 'Server error');
+    }
+    
+    // Success!
+    alert('Task created successfully!');
+    e.target.reset();
+    
+    // Close Telegram mini app if available
+    if(tg) {
+      setTimeout(() => tg.close(), 1000);
+    }
+  } catch(err) {
+    // Handle button property errors with a more specific message
+    if(err.message && (err.message.includes('button') || err.message.includes('unsupported property type'))) {
+      alert('Error: The database contains button properties that are not supported. Your task was not saved.');
+    } else {
+      alert('Error: ' + err.message);
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+    submitting = false;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  buildForm();
+  document.getElementById('taskForm').addEventListener('submit', handleSubmit);
+});
