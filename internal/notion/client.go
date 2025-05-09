@@ -11,6 +11,29 @@ import (
 	"github.com/jomei/notionapi"
 )
 
+// ButtonProperty represents a Notion button property
+type ButtonProperty struct {
+	Button map[string]interface{} `json:"button"`
+}
+
+// GetType returns the type of the property
+func (p ButtonProperty) GetType() notionapi.PropertyType {
+	return "button"
+}
+
+// ButtonPropertyConfig represents the configuration for a button property
+type ButtonPropertyConfig struct {
+	Type   notionapi.PropertyConfigType `json:"type"`
+	Button map[string]interface{}       `json:"button"`
+	ID     string                       `json:"id,omitempty"`
+	Name   string                       `json:"name,omitempty"`
+}
+
+// GetType returns the type of the property config
+func (p ButtonPropertyConfig) GetType() notionapi.PropertyConfigType {
+	return p.Type
+}
+
 type Client struct {
 	client        *notionapi.Client
 	taskDbID      string
@@ -127,7 +150,7 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 				propType := prop.GetType()
 				log.Printf("Property %s has type: %s", key, propType)
 
-				// Skip button type properties and any other unsupported types
+				// Skip button and unsupported types
 				if propType == "button" || propType == "unsupported" {
 					log.Printf("Skipping unsupported property type: %s (type: %s)", key, propType)
 					continue
@@ -204,6 +227,12 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 			return fmt.Errorf("request to Notion API timed out after %v", elapsedTime)
 		}
 
+		// Check for button property error
+		if strings.Contains(err.Error(), "unsupported property type: button") {
+			log.Printf("Error due to button property - adding workaround code")
+			return fmt.Errorf("database contains button properties which are not supported by Notion API. Please remove button properties from the request")
+		}
+
 		return fmt.Errorf("Notion API error: %w", err)
 	}
 
@@ -253,11 +282,19 @@ func (c *Client) GetDatabaseProperties(ctx context.Context, dbType string) (map[
 		return nil, fmt.Errorf("failed to get database: %w", err)
 	}
 
+	// Create a copy of the properties to handle button type
+	properties := make(map[string]notionapi.PropertyConfig)
+
+	// Copy all properties from the DB response
+	for key, prop := range db.Properties {
+		properties[key] = prop
+	}
+
 	// Cache the result with 10 minute expiry
-	c.dbCache[dbID] = db.Properties
+	c.dbCache[dbID] = properties
 	c.dbCacheExpiry[dbID] = time.Now().Add(10 * time.Minute)
 
-	return db.Properties, nil
+	return properties, nil
 }
 
 // For backward compatibility

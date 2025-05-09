@@ -359,6 +359,12 @@ func handleProperties(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		// Skip button properties to avoid API errors
+		if propType == "button" {
+			log.Printf("Skipping button property: %s", name)
+			continue
+		}
+
 		propInfo := map[string]interface{}{
 			"type": propType,
 		}

@@ -110,7 +110,18 @@ async function loadDatabaseProperties() {
         const response = await fetch(`/notion/mini-app/api/properties?db_type=${currentDbType}`);
         
         if (!response.ok) {
-            const errorText = await response.text();
+            let errorText = '';
+            try {
+                const errorData = await response.json();
+                errorText = errorData.error || `Status code: ${response.status}`;
+                
+                // Check for button property errors
+                if (errorText.includes('button')) {
+                    errorText = "Database contains unsupported button properties. The form may not show all available properties. You can still create items, but button properties will be ignored.";
+                }
+            } catch (e) {
+                errorText = await response.text();
+            }
             throw new Error(`API returned ${response.status}: ${errorText}`);
         }
         
@@ -119,6 +130,11 @@ async function loadDatabaseProperties() {
         
         // Cache the properties
         propertiesCache[currentDbType] = properties;
+        
+        // Check if we have properties to show
+        if (Object.keys(properties).length === 0) {
+            throw new Error(`No usable properties found for ${currentDbType} database. The database might only contain button properties which are not supported.`);
+        }
         
         // Create form fields for the properties
         createPropertyFields(properties);
@@ -147,9 +163,12 @@ function createPropertyFields(properties) {
             continue;
         }
         
-        // Skip button-like properties
-        const buttonKeywords = ['button', 'submit', 'action'];
-        if (buttonKeywords.some(keyword => key.toLowerCase().includes(keyword))) {
+        // Skip button properties and button-like properties
+        if (config.type === 'button' || 
+            key.toLowerCase().includes('button') || 
+            key.toLowerCase().includes('submit') || 
+            key.toLowerCase().includes('action')) {
+            console.log(`Skipping button property: ${key}`);
             continue;
         }
 
@@ -164,11 +183,6 @@ function createPropertyFields(properties) {
             required.textContent = ' *';
             required.style.color = 'red';
             label.appendChild(required);
-        }
-
-        // Skip creating input fields for button properties
-        if (config.type === 'button') {
-            continue;
         }
 
         let input;
@@ -505,10 +519,27 @@ async function handleSubmit(event) {
             body: JSON.stringify(taskData)
         });
         
-        const data = await response.json();
+        // Parse the response
+        let data;
+        let errorMessage = '';
         
-        if (!response.ok) {
-            throw new Error(data.message || `Server error: ${response.status}`);
+        try {
+            data = await response.json();
+            if (!response.ok) {
+                errorMessage = data.message || `Server error: ${response.status}`;
+                
+                // Check for specific button property errors
+                if (errorMessage.includes('button') || errorMessage.includes('unsupported property type')) {
+                    errorMessage = "Failed to create item due to unsupported button properties in the database. Please contact the app administrator.";
+                }
+                
+                throw new Error(errorMessage);
+            }
+        } catch (jsonError) {
+            if (!response.ok) {
+                throw new Error(`Server error: ${response.status}`);
+            }
+            throw jsonError;
         }
         
         console.log('Item created successfully', data);
