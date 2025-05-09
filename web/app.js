@@ -591,10 +591,25 @@ async function loadProjects() {
     
     const projects = await response.json();
     
+    // Debug logging
+    console.log('Projects data received:', projects);
+    
     if (projects.length === 0) {
       projectsContainer.innerHTML = '<div class="no-tasks">No projects found</div>';
       return;
     }
+    
+    // Detailed logging of first project structure
+    if (projects.length > 0) {
+      console.log('First project detailed structure:');
+      console.log(JSON.stringify(projects[0], null, 2));
+    }
+    
+    // Debug: Log each project's status
+    console.log('Project status values:');
+    projects.forEach(project => {
+      console.log(`Project "${project.name || 'Unnamed'}": status="${project.status || 'undefined'}", type:${typeof project.status}`);
+    });
     
     projectsContainer.innerHTML = '';
     
@@ -608,9 +623,73 @@ async function loadProjects() {
     // Group projects by normalized status
     const projectsByStatus = {};
     
+    // Extract the status from a Notion project object
+    function extractProjectStatus(project) {
+      let status = '';
+      
+      // Try various paths to find the status
+      if (project.status) {
+        // Direct status property
+        status = project.status;
+      } else if (project.properties) {
+        // Check in properties object with various key formats
+        const props = project.properties;
+        
+        if (props.Status) {
+          // Status with capital S
+          if (typeof props.Status === 'string') {
+            status = props.Status;
+          } else if (typeof props.Status === 'object') {
+            // It might be a complex object
+            if (props.Status.select && props.Status.select.name) {
+              status = props.Status.select.name;
+            } else if (props.Status.name) {
+              status = props.Status.name;
+            }
+          }
+        } else if (props.status) {
+          // Status with lowercase s
+          if (typeof props.status === 'string') {
+            status = props.status;
+          } else if (typeof props.status === 'object') {
+            // It might be a complex object
+            if (props.status.select && props.status.select.name) {
+              status = props.status.select.name;
+            } else if (props.status.name) {
+              status = props.status.name;
+            }
+          }
+        } else {
+          // Iterate through all properties to find any key containing "status"
+          for (const key in props) {
+            if (key.toLowerCase().includes('status')) {
+              const prop = props[key];
+              if (typeof prop === 'string') {
+                status = prop;
+                break;
+              } else if (typeof prop === 'object') {
+                if (prop.select && prop.select.name) {
+                  status = prop.select.name;
+                  break;
+                } else if (prop.name) {
+                  status = prop.name;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      // Convert to lowercase for consistent comparison
+      return status ? status.toLowerCase() : '';
+    }
+
     // First pass: categorize projects into standard status buckets
     projects.forEach(project => {
-      let projectStatus = project.status ? project.status.toLowerCase() : '';
+      const projectStatus = extractProjectStatus(project);
+      console.log(`Processing project "${project.name || 'Unnamed'}": status="${projectStatus}"`);
+      
       let normalizedStatus = 'other';
       
       // Map various status terms to our standard categories
@@ -622,6 +701,8 @@ async function loadProjects() {
         normalizedStatus = 'done';
       }
       
+      console.log(`  → Normalized status: "${normalizedStatus}"`);
+      
       // Create the status bucket if it doesn't exist
       if (!projectsByStatus[normalizedStatus]) {
         projectsByStatus[normalizedStatus] = [];
@@ -630,6 +711,9 @@ async function loadProjects() {
       // Add the project to its status bucket
       projectsByStatus[normalizedStatus].push(project);
     });
+    
+    // Log the categorized projects
+    console.log('Projects by status category:', Object.keys(projectsByStatus));
     
     // Define the order in which to display status columns
     const statusOrder = ['not started', 'in progress', 'done', 'other'];
@@ -669,37 +753,94 @@ async function loadProjects() {
       const projectList = document.createElement('ul');
       projectList.className = 'project-list';
       
+      // Extract the name from a Notion project object
+      function extractProjectName(project) {
+        if (project.name) {
+          return project.name;
+        }
+        
+        if (project.properties) {
+          const props = project.properties;
+          
+          // Try different property names for the title
+          const titleKeys = ['Project name', 'Name', 'Title', 'project name', 'name', 'title'];
+          
+          for (const key of titleKeys) {
+            if (props[key]) {
+              const prop = props[key];
+              
+              if (typeof prop === 'string') {
+                return prop;
+              } else if (typeof prop === 'object') {
+                // Handle complex title object
+                if (prop.title && Array.isArray(prop.title) && prop.title.length > 0) {
+                  if (prop.title[0].plain_text) {
+                    return prop.title[0].plain_text;
+                  } else if (prop.title[0].text && prop.title[0].text.content) {
+                    return prop.title[0].text.content;
+                  }
+                }
+                
+                // Try other common paths
+                if (prop.text && typeof prop.text === 'string') {
+                  return prop.text;
+                }
+              }
+            }
+          }
+        }
+        
+        return 'Untitled Project';
+      }
+
       // Add each project to the list
       projectsByStatus[statusKey].forEach(project => {
         const projectItem = document.createElement('li');
         projectItem.className = 'project-item';
         
+        // Get project name from helper function
+        const projectName = extractProjectName(project);
+        
         // Create project details
         let projectHTML = `
           <div class="project-title">
-            <a href="${project.url}" target="_blank">${project.name || 'Untitled Project'}</a>
+            <a href="${project.url}" target="_blank">${projectName}</a>
           </div>
           <div class="project-meta">
         `;
         
         // Add priority if available
+        let priority = '';
         if (project.priority) {
+          priority = project.priority;
+        } else if (project.properties && project.properties.Priority) {
+          priority = project.properties.Priority;
+        }
+        
+        if (priority) {
           let priorityClass = 'low';
-          if (project.priority.toLowerCase().includes('high')) {
+          if (priority.toLowerCase().includes('high')) {
             priorityClass = 'high';
-          } else if (project.priority.toLowerCase().includes('med')) {
+          } else if (priority.toLowerCase().includes('med')) {
             priorityClass = 'medium';
           }
           
           projectHTML += `
-            <div class="project-priority ${priorityClass}">${project.priority}</div>
+            <div class="project-priority ${priorityClass}">${priority}</div>
           `;
         }
         
         // Add end date if available
+        let endDate = '';
         if (project.end_date) {
+          endDate = project.end_date;
+        } else if (project.properties && project.properties['End date']) {
+          endDate = project.properties['End date'];
+        }
+        
+        if (endDate) {
           projectHTML += `
-            <div class="project-date">${project.end_date}</div>
+            <div class="project-date">${endDate}</div>
           `;
         }
         
