@@ -2,7 +2,6 @@ package notion
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -13,36 +12,64 @@ import (
 )
 
 type Client struct {
-	client *notionapi.Client
-	dbID   string
+	client        *notionapi.Client
+	taskDbID      string
+	notesDbID     string
+	dbCache       map[string]map[string]notionapi.PropertyConfig
+	dbCacheExpiry map[string]time.Time
 }
 
 func NewClient() *Client {
 	apiToken := os.Getenv("NOTION_API_KEY")
-	dbID := os.Getenv("NOTION_DATABASE_ID")
+	taskDbID := os.Getenv("NOTION_TASKS_DATABASE_ID")
+	notesDbID := os.Getenv("NOTION_NOTES_DATABASE_ID")
 
 	if apiToken == "" {
 		log.Printf("WARNING: NOTION_API_KEY environment variable is not set")
 	}
 
-	if dbID == "" {
-		log.Printf("WARNING: NOTION_DATABASE_ID environment variable is not set")
+	if taskDbID == "" {
+		// For backward compatibility
+		taskDbID = os.Getenv("NOTION_DATABASE_ID")
+		if taskDbID == "" {
+			log.Printf("WARNING: NOTION_TASKS_DATABASE_ID environment variable is not set")
+		}
+	}
+
+	if notesDbID == "" {
+		log.Printf("WARNING: NOTION_NOTES_DATABASE_ID environment variable is not set")
 	}
 
 	// Create standard Notion client
 	client := notionapi.NewClient(notionapi.Token(apiToken))
 
 	return &Client{
-		client: client,
-		dbID:   dbID,
+		client:        client,
+		taskDbID:      taskDbID,
+		notesDbID:     notesDbID,
+		dbCache:       make(map[string]map[string]notionapi.PropertyConfig),
+		dbCacheExpiry: make(map[string]time.Time),
 	}
 }
 
-func (c *Client) CreateTask(ctx context.Context, title string, properties map[string]interface{}) error {
-	log.Printf("Creating task: %s with properties: %v", title, properties)
+func (c *Client) GetTasksDatabaseID() string {
+	return c.taskDbID
+}
+
+func (c *Client) GetNotesDatabaseID() string {
+	return c.notesDbID
+}
+
+func (c *Client) CreateTask(ctx context.Context, title string, properties map[string]interface{}, dbType string) error {
+	dbID := c.getDbIDForType(dbType)
+	log.Printf("Creating task in %s database: %s with properties: %v", dbType, title, properties)
 
 	if title == "" {
 		return fmt.Errorf("task title cannot be empty")
+	}
+
+	if dbID == "" {
+		return fmt.Errorf("database ID for %s not configured", dbType)
 	}
 
 	// Check if context has a deadline (timeout)
@@ -52,32 +79,23 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 	} else {
 		// If no timeout set, add one to prevent hanging
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		log.Printf("Added 30s timeout to context")
+		log.Printf("Added 10s timeout to context")
 	}
 
 	// Get database properties to check for button types
-	dbProps, err := c.GetDatabaseProperties(ctx)
+	dbProps, err := c.GetDatabaseProperties(ctx, dbType)
 	if err != nil {
 		log.Printf("Warning: Could not fetch database properties: %v", err)
 		// Continue anyway but be more cautious
-	}
-
-	// Log all database properties for debugging
-	if dbProps != nil {
-		log.Printf("Database properties found: %d", len(dbProps))
-		for name, prop := range dbProps {
-			propType := prop.GetType()
-			log.Printf("DB Property: %s (Type: %s)", name, propType)
-		}
 	}
 
 	// Create the base request with title property
 	page := &notionapi.PageCreateRequest{
 		Parent: notionapi.Parent{
 			Type:       notionapi.ParentTypeDatabaseID,
-			DatabaseID: notionapi.DatabaseID(c.dbID),
+			DatabaseID: notionapi.DatabaseID(dbID),
 		},
 		Properties: notionapi.Properties{
 			"Name": notionapi.TitleProperty{
@@ -186,23 +204,65 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 			return fmt.Errorf("request to Notion API timed out after %v", elapsedTime)
 		}
 
-		// Check if it's a button property error
-		if err.Error() == "unsupported property type: button" {
-			log.Printf("CRITICAL: Button property error detected despite filtering!")
-			log.Printf("Properties after filtering: %v", page.Properties)
-
-			// Further diagnose which property might be causing it
-			for key, prop := range page.Properties {
-				propJSON, _ := json.Marshal(prop)
-				log.Printf("Property %s: %s", key, string(propJSON))
-			}
-		}
-
 		return fmt.Errorf("Notion API error: %w", err)
 	}
 
 	log.Printf("Task created successfully with ID: %s", createdPage.ID)
 	return nil
+}
+
+func (c *Client) getDbIDForType(dbType string) string {
+	switch dbType {
+	case "notes":
+		return c.notesDbID
+	case "tasks":
+		return c.taskDbID
+	default:
+		// Default to tasks database for backward compatibility
+		return c.taskDbID
+	}
+}
+
+// GetDatabaseProperties retrieves database properties and caches them for efficiency
+func (c *Client) GetDatabaseProperties(ctx context.Context, dbType string) (map[string]notionapi.PropertyConfig, error) {
+	dbID := c.getDbIDForType(dbType)
+
+	// Check cache first
+	if props, ok := c.dbCache[dbID]; ok {
+		// Check if cache is still valid (10 minute cache)
+		if expiryTime, ok := c.dbCacheExpiry[dbID]; ok && time.Now().Before(expiryTime) {
+			log.Printf("Using cached database properties for %s", dbType)
+			return props, nil
+		}
+	}
+
+	if dbID == "" {
+		return nil, fmt.Errorf("database ID for %s not configured", dbType)
+	}
+
+	// Add timeout to context if not already present
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+	}
+
+	// Call Notion API to get database
+	db, err := c.client.Database.Get(ctx, notionapi.DatabaseID(dbID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database: %w", err)
+	}
+
+	// Cache the result with 10 minute expiry
+	c.dbCache[dbID] = db.Properties
+	c.dbCacheExpiry[dbID] = time.Now().Add(10 * time.Minute)
+
+	return db.Properties, nil
+}
+
+// For backward compatibility
+func (c *Client) CreateItem(ctx context.Context, title string, properties map[string]interface{}) error {
+	return c.CreateTask(ctx, title, properties, "tasks")
 }
 
 // Helper methods for handling different property types
@@ -337,31 +397,6 @@ func (c *Client) handlePhoneProperty(page *notionapi.PageCreateRequest, key stri
 			PhoneNumber: phoneStr,
 		}
 	}
-}
-
-func (c *Client) GetDatabaseProperties(ctx context.Context) (map[string]notionapi.PropertyConfig, error) {
-	log.Printf("Fetching database properties for database ID: %s", c.dbID)
-
-	db, err := c.client.Database.Get(ctx, notionapi.DatabaseID(c.dbID))
-	if err != nil {
-		log.Printf("Error fetching database properties: %v", err)
-		return nil, err
-	}
-
-	log.Printf("Successfully fetched database properties: %d properties found", len(db.Properties))
-
-	// This helper will be useful for debugging
-	for name, config := range db.Properties {
-		propType := config.GetType()
-		log.Printf("Property: %s, Type: %s", name, propType)
-
-		// For date properties, check if we should handle them differently
-		if propType == "date" {
-			log.Printf("Found date property: %s", name)
-		}
-	}
-
-	return db.Properties, nil
 }
 
 // parseToNotionDate converts a string to a Notion Date pointer

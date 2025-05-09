@@ -3,11 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"log"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,23 +17,6 @@ import (
 )
 
 func main() {
-	// Define command-line flags
-	debugMode := flag.Bool("debug", false, "Run in debug mode to diagnose database properties")
-	debugTaskMode := flag.Bool("debug-task", false, "Run in debug task mode to test task creation directly")
-	flag.Parse()
-
-	// Run debug mode if requested
-	if *debugMode {
-		log.Println("Debug mode not yet implemented - run 'go run cmd/debug.go' separately")
-		return
-	}
-
-	// Run debug task mode if requested
-	if *debugTaskMode {
-		log.Println("Debug task mode not yet implemented - run 'go run cmd/debug-task.go' separately")
-		return
-	}
-
 	// Load environment variables
 	if err := godotenv.Load(); err != nil {
 		log.Printf("Warning: .env file not found, using environment variables")
@@ -165,22 +146,44 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 	// Check environment (limit what's exposed in production)
 	isProd := os.Getenv("ENVIRONMENT") == "production"
 
+	// Initialize Notion client to get database IDs
+	notionClient := notion.NewClient()
+
 	// Create config object
 	config := map[string]string{
 		"MINI_APP_URL": os.Getenv("MINI_APP_URL"),
 	}
 
+	// Add boolean flags for available databases
+	hasTasksDb := notionClient.GetTasksDatabaseID() != ""
+	hasNotesDb := notionClient.GetNotesDatabaseID() != ""
+
+	if hasTasksDb {
+		config["HAS_TASKS_DB"] = "true"
+	} else {
+		config["HAS_TASKS_DB"] = "false"
+	}
+
+	if hasNotesDb {
+		config["HAS_NOTES_DB"] = "true"
+	} else {
+		config["HAS_NOTES_DB"] = "false"
+	}
+
 	// Add sensitive info only in non-production environments
 	if !isProd {
 		notionKey := os.Getenv("NOTION_API_KEY")
-		notionDBID := os.Getenv("NOTION_DATABASE_ID")
+		tasksDbID := notionClient.GetTasksDatabaseID()
+		notesDbID := notionClient.GetNotesDatabaseID()
 
 		// Log available keys (without exposing their values)
 		log.Printf("Config: NOTION_API_KEY available: %v", notionKey != "")
-		log.Printf("Config: NOTION_DATABASE_ID available: %v", notionDBID != "")
+		log.Printf("Config: NOTION_TASKS_DATABASE_ID available: %v", tasksDbID != "")
+		log.Printf("Config: NOTION_NOTES_DATABASE_ID available: %v", notesDbID != "")
 
 		config["NOTION_API_KEY"] = notionKey
-		config["NOTION_DATABASE_ID"] = notionDBID
+		config["NOTION_TASKS_DATABASE_ID"] = tasksDbID
+		config["NOTION_NOTES_DATABASE_ID"] = notesDbID
 	}
 
 	// Return configuration as JSON
@@ -249,128 +252,52 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 
 	// Validate request
 	if taskReq.Title == "" {
-		log.Printf("Missing task title")
 		sendJSONError(http.StatusBadRequest, "Task title is required")
 		return
 	}
 
-	// Create Notion client to get database properties
+	// Get database type from query param or default to "tasks"
+	dbType := r.URL.Query().Get("db_type")
+	if dbType == "" {
+		dbType = "tasks"
+	}
+
+	// Initialize Notion client
 	notionClient := notion.NewClient()
-	ctx := context.Background()
 
-	// Get database properties to validate against
-	dbProps, err := notionClient.GetDatabaseProperties(ctx)
-	if err != nil {
-		log.Printf("Warning: Could not fetch database properties: %v", err)
-		// Continue but be more cautious with property handling
-	}
-
-	// Filter properties to only include supported Notion types
-	filteredProperties := make(map[string]interface{})
-
-	// First pass: Convert properties to the correct type and filter out unsupported ones
-	for key, value := range taskReq.Properties {
-		// Skip known button properties or potentially problematic properties
-		if key == "button" || key == "complete" || key == "status" || key == "done" || key == "checkbox" ||
-			strings.Contains(strings.ToLower(key), "button") {
-			log.Printf("Skipping potentially problematic property: %s", key)
-			continue
-		}
-
-		// If we have database properties, check if this property exists in the database
-		if dbProps != nil {
-			if prop, exists := dbProps[key]; exists {
-				propType := prop.GetType()
-				log.Printf("Found property %s with type %s in database", key, propType)
-
-				// Skip button type properties and other unsupported types
-				if propType == "button" || propType == "unsupported" {
-					log.Printf("Skipping unsupported property type from database: %s (type: %s)", key, propType)
-					continue
-				}
-
-				// Process property based on its type in the database
-				switch propType {
-				case "checkbox":
-					// Convert checkbox values to bool
-					boolValue := false
-					switch v := value.(type) {
-					case bool:
-						boolValue = v
-					case string:
-						boolValue = v == "true" || v == "yes" || v == "1"
-					case float64:
-						boolValue = v != 0
-					case int:
-						boolValue = v != 0
-					}
-					filteredProperties[key] = boolValue
-					continue
-
-				case "number":
-					// Try to convert to number if not already
-					switch v := value.(type) {
-					case float64, int:
-						filteredProperties[key] = v
-					case string:
-						// Try to parse as float
-						if parsedFloat, err := strconv.ParseFloat(v, 64); err == nil {
-							filteredProperties[key] = parsedFloat
-						} else {
-							log.Printf("Warning: Could not parse %s as number for property %s, skipping", v, key)
-							continue
-						}
-					default:
-						log.Printf("Warning: Unsupported type for number property %s, skipping", key)
-						continue
-					}
-					continue
-				}
-			} else {
-				log.Printf("Property %s does not exist in database schema, skipping", key)
-				continue
-			}
-		}
-
-		// Include the property in filtered set
-		filteredProperties[key] = value
-	}
-
-	log.Printf("After filtering: %d properties remaining of %d original properties",
-		len(filteredProperties), len(taskReq.Properties))
-
-	// Create the task in Notion with timeout context
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	// Create a context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	if err := notionClient.CreateTask(ctx, taskReq.Title, filteredProperties); err != nil {
+	start := time.Now()
+	log.Printf("Creating task in %s database: %s", dbType, taskReq.Title)
+
+	// Create the task in Notion
+	err := notionClient.CreateTask(ctx, taskReq.Title, taskReq.Properties, dbType)
+	if err != nil {
 		log.Printf("Error creating task in Notion: %v", err)
 		sendJSONError(http.StatusInternalServerError, "Failed to create task: "+err.Error())
 		return
 	}
 
-	// Return success
+	elapsed := time.Since(start)
+	log.Printf("Task created successfully in %v", elapsed)
+
+	// Return success response
 	w.WriteHeader(http.StatusCreated)
-	err = json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
 		"message": "Task created successfully",
-	})
-	if err != nil {
+	}); err != nil {
 		log.Printf("Error encoding success response: %v", err)
 	}
 }
 
-// API handler for database properties
+// Handler for database properties API
 func handleProperties(w http.ResponseWriter, r *http.Request) {
-	// Only handle GET requests
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+	log.Printf("Properties API called from: %s %s", r.RemoteAddr, r.URL.Path)
 
-	log.Printf("Handling properties request from %s", r.RemoteAddr)
-
-	// Set CORS headers to allow requests from any origin
+	// Set CORS headers
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
@@ -381,84 +308,92 @@ func handleProperties(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set content type
+	// Set content type for the response
 	w.Header().Set("Content-Type", "application/json")
 
-	// Try to get properties from Notion
-	notionClient := notion.NewClient()
-	ctx := context.Background()
-	properties, err := notionClient.GetDatabaseProperties(ctx)
-
-	// Prepare a map for the response
-	simplifiedProps := make(map[string]map[string]interface{})
-
-	if err != nil {
-		// Log the error
-		log.Printf("Error fetching properties from Notion: %v", err)
-
-		// Create default properties
-		simplifiedProps = map[string]map[string]interface{}{
-			"Name": {
-				"type":     "title",
-				"required": true,
-			},
-			"Tags": {
-				"type":    "multi_select",
-				"options": []string{"sometimes-later"},
-			},
-			"project": {
-				"type":    "select",
-				"options": []string{"household-tasks", "the-wellness-hub"},
-			},
-			"Date": {
-				"type": "date",
-			},
-			"Complete": {
-				"type": "checkbox",
-			},
-		}
-	} else {
-		// Convert properties to a more frontend-friendly format
-		for name, prop := range properties {
-			propType := string(prop.GetType())
-			propInfo := map[string]interface{}{
-				"type": propType,
-			}
-
-			// Add more specific info based on property type
-			switch propType {
-			case "multi_select":
-				if multiSelect, ok := prop.(*notionapi.MultiSelectPropertyConfig); ok {
-					var options []string
-					for _, option := range multiSelect.MultiSelect.Options {
-						options = append(options, option.Name)
-					}
-					propInfo["options"] = options
-				}
-			case "select":
-				if sel, ok := prop.(*notionapi.SelectPropertyConfig); ok {
-					var options []string
-					for _, option := range sel.Select.Options {
-						options = append(options, option.Name)
-					}
-					propInfo["options"] = options
-				}
-			case "title":
-				propInfo["required"] = true
-			case "checkbox":
-				propInfo["type"] = "checkbox"
-			case "date":
-				propInfo["type"] = "date"
-			}
-
-			simplifiedProps[name] = propInfo
-		}
+	// Helper function for error responses
+	sendJSONError := func(statusCode int, message string) {
+		w.WriteHeader(statusCode)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": message,
+		})
 	}
 
-	if err := json.NewEncoder(w).Encode(simplifiedProps); err != nil {
-		log.Printf("Error encoding properties response: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	// Only process GET requests
+	if r.Method != http.MethodGet {
+		sendJSONError(http.StatusMethodNotAllowed, "Method not allowed")
 		return
+	}
+
+	// Get database type from query param or default to "tasks"
+	dbType := r.URL.Query().Get("db_type")
+	if dbType == "" {
+		dbType = "tasks"
+	}
+
+	log.Printf("Fetching properties for database type: %s", dbType)
+
+	// Initialize Notion client
+	notionClient := notion.NewClient()
+
+	// Create a context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Fetch database properties from Notion
+	properties, err := notionClient.GetDatabaseProperties(ctx, dbType)
+	if err != nil {
+		log.Printf("Error getting database properties: %v", err)
+		sendJSONError(http.StatusInternalServerError, "Failed to get database properties: "+err.Error())
+		return
+	}
+
+	// Transform the properties to a more frontend-friendly format
+	result := make(map[string]map[string]interface{})
+
+	for name, prop := range properties {
+		propType := prop.GetType()
+
+		// Skip internal properties
+		if strings.HasPrefix(name, "_") {
+			continue
+		}
+
+		propInfo := map[string]interface{}{
+			"type": propType,
+		}
+
+		// Add options for select and multi_select types
+		switch propType {
+		case "select":
+			if selectProp, ok := prop.(*notionapi.SelectPropertyConfig); ok {
+				options := make([]string, 0)
+				if selectProp.Select.Options != nil {
+					for _, opt := range selectProp.Select.Options {
+						options = append(options, opt.Name)
+					}
+				}
+				propInfo["options"] = options
+			}
+		case "multi_select":
+			if multiSelectProp, ok := prop.(*notionapi.MultiSelectPropertyConfig); ok {
+				options := make([]string, 0)
+				if multiSelectProp.MultiSelect.Options != nil {
+					for _, opt := range multiSelectProp.MultiSelect.Options {
+						options = append(options, opt.Name)
+					}
+				}
+				propInfo["options"] = options
+			}
+		}
+
+		result[name] = propInfo
+	}
+
+	// Send the property data as JSON
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		log.Printf("Error encoding properties: %v", err)
 	}
 }
 
@@ -496,50 +431,70 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// Debug endpoint for creating a task with minimal properties
+// Debug endpoint for testing task creation
 func handleDebugTask(w http.ResponseWriter, r *http.Request) {
-	log.Printf("Handling debug task request from %s", r.RemoteAddr)
+	log.Printf("Debug task endpoint called from: %s", r.RemoteAddr)
 
 	// Set CORS headers
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Handle preflight OPTIONS request
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Set content type
 	w.Header().Set("Content-Type", "application/json")
 
-	// Only allow in non-production environments
-	if os.Getenv("ENVIRONMENT") == "production" {
-		w.WriteHeader(http.StatusForbidden)
+	// Only handle POST requests
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
 		json.NewEncoder(w).Encode(map[string]string{
-			"status":  "error",
-			"message": "Debug endpoints not available in production",
+			"error": "Method not allowed",
 		})
 		return
 	}
 
-	// Create a task with minimal properties
+	// Parse the request
+	var req struct {
+		Title      string                 `json:"title"`
+		Properties map[string]interface{} `json:"properties"`
+		DbType     string                 `json:"db_type"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Error decoding debug task request: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Invalid request: " + err.Error(),
+		})
+		return
+	}
+
+	// Set default database type if not provided
+	if req.DbType == "" {
+		req.DbType = "tasks"
+	}
+
+	// Log the request
+	log.Printf("Debug task: %+v", req)
+
+	// Initialize Notion client
 	notionClient := notion.NewClient()
-	ctx := context.Background()
 
-	// Get the title from query parameter or use default
-	title := r.URL.Query().Get("title")
-	if title == "" {
-		title = "Debug Task - " + time.Now().Format(time.RFC3339)
-	}
+	// Create task
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 
-	// Minimal properties (just a date)
-	properties := map[string]interface{}{
-		"Date": time.Now().Format("2006-01-02"),
-	}
-
-	// Create the task
-	err := notionClient.CreateTask(ctx, title, properties)
-
+	err := notionClient.CreateTask(ctx, req.Title, req.Properties, req.DbType)
 	if err != nil {
 		log.Printf("Error creating debug task: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{
-			"status":  "error",
-			"message": err.Error(),
+			"error": "Failed to create task: " + err.Error(),
 		})
 		return
 	}

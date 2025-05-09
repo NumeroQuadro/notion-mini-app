@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Notion Task Manager</title>
+    <title>Notion Manager</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="styles.css">
     <!-- Add Notion API Client -->
@@ -11,14 +11,20 @@
 </head>
 <body>
     <div class="container">
-        <h1>Create New Task</h1>
+        <h1>Create New Item</h1>
         <div id="error-container" class="error-message" style="display: none;"></div>
-        <div style="text-align: right; margin-bottom: 10px;">
-            <button type="button" id="testConfigBtn" class="test-btn">Test Config</button>
+        
+        <!-- Database tabs -->
+        <div class="tabs-container">
+            <div class="tabs">
+                <button type="button" id="tasksTab" class="tab active" data-db-type="tasks">Tasks</button>
+                <button type="button" id="notesTab" class="tab" data-db-type="notes">Notes</button>
+            </div>
         </div>
+        
         <form id="taskForm">
             <div class="form-group">
-                <label for="taskTitle">Task Title</label>
+                <label for="taskTitle">Title</label>
                 <input type="text" id="taskTitle" name="taskTitle" required>
             </div>
             
@@ -26,7 +32,7 @@
                 <!-- Dynamic properties will be added here -->
             </div>
 
-            <button type="submit" class="submit-btn" id="submitBtn">Create Task</button>
+            <button type="submit" class="submit-btn" id="submitBtn">Create Item</button>
         </form>
     </div>
     <script src="app.js"></script>
