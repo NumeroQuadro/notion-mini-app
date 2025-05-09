@@ -269,10 +269,6 @@ async function handleSubmit(e){
       showMessage(`${currentDbType === 'tasks' ? 'Task' : 'Note'} created successfully!`, false);
       e.target.reset();
       
-      // Close Telegram mini app if available
-      if(tg) {
-        setTimeout(() => tg.close(), 1500);
-      }
     } catch (apiError) {
       console.error("API error:", apiError);
       showMessage('Error saving to Notion. Please try again.', true);
@@ -374,8 +370,15 @@ async function loadRecentTasks() {
       const createdDate = new Date(task.created_at);
       const formattedDate = createdDate.toLocaleDateString() + ' ' + createdDate.toLocaleTimeString();
       
+      // Add checkbox for task completion
+      const checkboxId = `task-complete-${task.id}`;
+      
       taskItem.innerHTML = `
         <div class="task-header">
+          <div class="task-checkbox">
+            <input type="checkbox" id="${checkboxId}" class="task-complete-checkbox" data-task-id="${task.id}">
+            <label for="${checkboxId}"></label>
+          </div>
           <div class="task-title">${taskTitle.outerHTML}</div>
           <div class="task-date">Created: ${formattedDate}</div>
         </div>
@@ -389,9 +392,74 @@ async function loadRecentTasks() {
     
     tasksList.appendChild(taskList);
     
+    // Add event listeners to checkboxes
+    document.querySelectorAll('.task-complete-checkbox').forEach(checkbox => {
+      checkbox.addEventListener('change', handleTaskComplete);
+    });
+    
   } catch (error) {
     console.error('Error loading recent tasks:', error);
     tasksList.innerHTML = `<div class="error-message">Error loading tasks: ${error.message}</div>`;
+  }
+}
+
+// Handle task completion
+async function handleTaskComplete(event) {
+  const checkbox = event.target;
+  const taskId = checkbox.dataset.taskId;
+  const taskItem = checkbox.closest('.task-item');
+  
+  // Disable the checkbox while processing
+  checkbox.disabled = true;
+  
+  try {
+    // Show loading state
+    taskItem.classList.add('updating');
+    
+    // Update task status to "done"
+    const response = await fetch('/notion/mini-app/api/update-task-status', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        task_id: taskId,
+        status: 'done'
+      })
+    });
+    
+    if (!response.ok) {
+      const data = await response.json();
+      throw new Error(data.error || 'Failed to update task status');
+    }
+    
+    // Show success indicator
+    taskItem.classList.remove('updating');
+    taskItem.classList.add('completed');
+    
+    // Add delay before removing from list
+    setTimeout(() => {
+      taskItem.style.opacity = '0';
+      setTimeout(() => {
+        taskItem.remove();
+        
+        // If no tasks left, show message
+        if (document.querySelectorAll('.task-item').length === 0) {
+          document.getElementById('tasksList').innerHTML = '<div class="no-tasks">No tasks found matching criteria</div>';
+        }
+      }, 300);
+    }, 1000);
+    
+  } catch (error) {
+    console.error('Error updating task:', error);
+    
+    // Reset checkbox
+    checkbox.checked = false;
+    checkbox.disabled = false;
+    taskItem.classList.remove('updating');
+    
+    // Show error message
+    showMessage(`Error completing task: ${error.message}`, true);
   }
 }
 

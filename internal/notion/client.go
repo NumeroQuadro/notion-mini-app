@@ -812,3 +812,43 @@ func (c *Client) getRecentTasksWithButtonWorkaround(ctx context.Context, dbID st
 
 	return tasks, nil
 }
+
+// UpdateTaskStatus updates the status of a task in Notion
+func (c *Client) UpdateTaskStatus(taskID string, status string, properties map[string]interface{}) error {
+	// Create a context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Initialize properties map if nil
+	if properties == nil {
+		properties = make(map[string]interface{})
+	}
+
+	// Ensure status is set
+	properties["status"] = status
+
+	// Create the page update request
+	updateRequest := &notionapi.PageUpdateRequest{
+		Properties: make(notionapi.Properties),
+	}
+
+	// Add status property
+	updateRequest.Properties["status"] = notionapi.SelectProperty{
+		Select: notionapi.Option{
+			Name: status,
+		},
+	}
+
+	// Update the page in Notion
+	_, err := c.client.Page.Update(ctx, notionapi.PageID(taskID), updateRequest)
+	if err != nil {
+		// Handle button property error gracefully
+		if strings.Contains(err.Error(), "unsupported property type: button") {
+			log.Printf("Warning: Button property detected during update. Task status might not be updated correctly.")
+		}
+		return fmt.Errorf("failed to update task: %w", err)
+	}
+
+	log.Printf("Successfully updated task %s status to %s", taskID, status)
+	return nil
+}

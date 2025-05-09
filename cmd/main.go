@@ -100,6 +100,7 @@ func serveStaticFiles() {
 	http.HandleFunc("/notion/mini-app/api/properties", handleProperties)
 	http.HandleFunc("/notion/mini-app/api/log", handleLogs)
 	http.HandleFunc("/notion/mini-app/api/recent-tasks", handleRecentTasks)
+	http.HandleFunc("/notion/mini-app/api/update-task-status", handleUpdateTaskStatus)
 
 	// Simple config endpoint that returns environment variables as JSON
 	http.HandleFunc("/notion/mini-app/api/config", handleConfig)
@@ -610,4 +611,63 @@ func handleRecentTasks(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(tasks); err != nil {
 		log.Printf("Error encoding recent tasks: %v", err)
 	}
+}
+
+// API handler for updating task status
+func handleUpdateTaskStatus(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Update task status API called from: %s", r.RemoteAddr)
+
+	// Set CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Handle preflight OPTIONS request
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Only handle POST requests for updating task status
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse the request
+	var req struct {
+		TaskID     string                 `json:"task_id"`
+		Status     string                 `json:"status"`
+		Properties map[string]interface{} `json:"properties"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Error decoding update task status request: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate request
+	if req.TaskID == "" || req.Status == "" {
+		http.Error(w, "Task ID and status are required", http.StatusBadRequest)
+		return
+	}
+
+	// Initialize Notion client
+	notionClient := notion.NewClient()
+
+	// Update task status in Notion
+	err := notionClient.UpdateTaskStatus(req.TaskID, req.Status, req.Properties)
+	if err != nil {
+		log.Printf("Error updating task status: %v", err)
+		http.Error(w, "Failed to update task status", http.StatusInternalServerError)
+		return
+	}
+
+	// Return success
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Task status updated successfully",
+	})
 }
