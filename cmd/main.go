@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -312,16 +313,23 @@ func handleProperties(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// Helper function for error responses
-	sendJSONError := func(statusCode int, message string) {
-		w.WriteHeader(statusCode)
-		json.NewEncoder(w).Encode(map[string]string{
+	sendJSONError := func(statusCode int, message string, properties map[string]map[string]interface{}) {
+		response := map[string]interface{}{
 			"error": message,
-		})
+		}
+
+		// Include properties if available
+		if properties != nil && len(properties) > 0 {
+			response["properties"] = properties
+		}
+
+		w.WriteHeader(statusCode)
+		json.NewEncoder(w).Encode(response)
 	}
 
 	// Only process GET requests
 	if r.Method != http.MethodGet {
-		sendJSONError(http.StatusMethodNotAllowed, "Method not allowed")
+		sendJSONError(http.StatusMethodNotAllowed, "Method not allowed", nil)
 		return
 	}
 
@@ -342,58 +350,83 @@ func handleProperties(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch database properties from Notion
 	properties, err := notionClient.GetDatabaseProperties(ctx, dbType)
-	if err != nil {
-		log.Printf("Error getting database properties: %v", err)
-		sendJSONError(http.StatusInternalServerError, "Failed to get database properties: "+err.Error())
-		return
-	}
 
 	// Transform the properties to a more frontend-friendly format
 	result := make(map[string]map[string]interface{})
 
-	for name, prop := range properties {
-		propType := prop.GetType()
+	// If there was an error but we still want to proceed
+	var errorMessage string
+	var buttonPropertyDetected bool
 
-		// Skip internal properties
-		if strings.HasPrefix(name, "_") {
-			continue
+	if err != nil {
+		errorMessage = fmt.Sprintf("Failed to get full database properties: %v", err)
+		log.Printf("Error getting database properties: %v", err)
+
+		// Check if it's a button property error
+		if strings.Contains(err.Error(), "button") || strings.Contains(err.Error(), "unsupported property type") {
+			buttonPropertyDetected = true
+			log.Printf("Button property detected, will continue with partial properties")
+		} else {
+			// For other errors, return the error without properties
+			sendJSONError(http.StatusInternalServerError, errorMessage, nil)
+			return
 		}
+	}
 
-		// Skip button properties to avoid API errors
-		if propType == "button" {
-			log.Printf("Skipping button property: %s", name)
-			continue
-		}
+	// Process properties if we have them
+	if properties != nil {
+		for name, prop := range properties {
+			propType := prop.GetType()
 
-		propInfo := map[string]interface{}{
-			"type": propType,
-		}
-
-		// Add options for select and multi_select types
-		switch propType {
-		case "select":
-			if selectProp, ok := prop.(*notionapi.SelectPropertyConfig); ok {
-				options := make([]string, 0)
-				if selectProp.Select.Options != nil {
-					for _, opt := range selectProp.Select.Options {
-						options = append(options, opt.Name)
-					}
-				}
-				propInfo["options"] = options
+			// Skip internal properties
+			if strings.HasPrefix(name, "_") {
+				continue
 			}
-		case "multi_select":
-			if multiSelectProp, ok := prop.(*notionapi.MultiSelectPropertyConfig); ok {
-				options := make([]string, 0)
-				if multiSelectProp.MultiSelect.Options != nil {
-					for _, opt := range multiSelectProp.MultiSelect.Options {
-						options = append(options, opt.Name)
-					}
-				}
-				propInfo["options"] = options
-			}
-		}
 
-		result[name] = propInfo
+			// Skip button properties to avoid API errors
+			if propType == "button" {
+				buttonPropertyDetected = true
+				log.Printf("Skipping button property: %s", name)
+				continue
+			}
+
+			propInfo := map[string]interface{}{
+				"type": propType,
+			}
+
+			// Add options for select and multi_select types
+			switch propType {
+			case "select":
+				if selectProp, ok := prop.(*notionapi.SelectPropertyConfig); ok {
+					options := make([]string, 0)
+					if selectProp.Select.Options != nil {
+						for _, opt := range selectProp.Select.Options {
+							options = append(options, opt.Name)
+						}
+					}
+					propInfo["options"] = options
+				}
+			case "multi_select":
+				if multiSelectProp, ok := prop.(*notionapi.MultiSelectPropertyConfig); ok {
+					options := make([]string, 0)
+					if multiSelectProp.MultiSelect.Options != nil {
+						for _, opt := range multiSelectProp.MultiSelect.Options {
+							options = append(options, opt.Name)
+						}
+					}
+					propInfo["options"] = options
+				}
+			}
+
+			result[name] = propInfo
+		}
+	}
+
+	// If there was a button property, send a warning but still include properties
+	if buttonPropertyDetected {
+		log.Printf("Returning properties with button property warning")
+		sendJSONError(http.StatusOK, "Database contains button properties which are not fully supported. Some properties may not be shown.", result)
+		return
 	}
 
 	// Send the property data as JSON

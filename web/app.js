@@ -110,18 +110,39 @@ async function loadDatabaseProperties() {
         const response = await fetch(`/notion/mini-app/api/properties?db_type=${currentDbType}`);
         
         if (!response.ok) {
+            // Try to parse the error as JSON
             let errorText = '';
+            let isButtonError = false;
+            
             try {
                 const errorData = await response.json();
                 errorText = errorData.error || `Status code: ${response.status}`;
                 
-                // Check for button property errors
-                if (errorText.includes('button')) {
-                    errorText = "Database contains unsupported button properties. The form may not show all available properties. You can still create items, but button properties will be ignored.";
+                // Check if it's a button property error
+                isButtonError = errorText.includes('button') || errorText.includes('unsupported property type');
+                
+                if (isButtonError) {
+                    // Show a warning but continue
+                    showWarning("Database contains button properties which are not supported. Some properties may not be shown, but you can still create items.");
+                    
+                    // If error response contains properties, use them
+                    if (errorData.properties) {
+                        createPropertyFields(errorData.properties);
+                        return;
+                    }
                 }
             } catch (e) {
                 errorText = await response.text();
             }
+            
+            // For button errors, try to continue with empty properties
+            if (isButtonError) {
+                // Use empty properties
+                propertiesCache[currentDbType] = {};
+                createPropertyFields({});
+                return;
+            }
+            
             throw new Error(`API returned ${response.status}: ${errorText}`);
         }
         
@@ -133,15 +154,24 @@ async function loadDatabaseProperties() {
         
         // Check if we have properties to show
         if (Object.keys(properties).length === 0) {
-            throw new Error(`No usable properties found for ${currentDbType} database. The database might only contain button properties which are not supported.`);
+            showWarning(`No properties found for ${currentDbType} database. You can still create items with just a title.`);
         }
         
         // Create form fields for the properties
         createPropertyFields(properties);
     } catch (error) {
         console.error('Error fetching properties:', error);
-        document.getElementById('propertiesContainer').innerHTML = 
-            `<div class="error-message">Failed to load database properties: ${error.message}</div>`;
+        
+        // Check if it's a button property error
+        if (error.message && (error.message.includes('button') || error.message.includes('unsupported property type'))) {
+            // Show warning but allow the form to be used
+            showWarning("Database contains button properties which are not supported. Only the title field will be available, but you can still create items.");
+            createPropertyFields({});
+        } else {
+            // Show the error message
+            document.getElementById('propertiesContainer').innerHTML = 
+                `<div class="error-message">Failed to load database properties: ${error.message}</div>`;
+        }
     }
 }
 
@@ -595,4 +625,17 @@ function showPopup(title, message) {
     
     // Fallback for browser
     alert(`${title}: ${message}`);
+}
+
+// Show a warning message that doesn't block usage
+function showWarning(message) {
+    const warningDiv = document.createElement('div');
+    warningDiv.className = 'warning-message';
+    warningDiv.textContent = message;
+    
+    // Insert the warning at the top of the properties container
+    const container = document.getElementById('propertiesContainer');
+    container.insertBefore(warningDiv, container.firstChild);
+    
+    console.warn(message);
 } 

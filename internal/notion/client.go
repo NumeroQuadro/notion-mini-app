@@ -279,6 +279,12 @@ func (c *Client) GetDatabaseProperties(ctx context.Context, dbType string) (map[
 	// Call Notion API to get database
 	db, err := c.client.Database.Get(ctx, notionapi.DatabaseID(dbID))
 	if err != nil {
+		// Check if it's a button property error
+		if strings.Contains(err.Error(), "unsupported property type: button") {
+			log.Printf("Warning: Database has button properties which are not supported by the API library")
+			// Try a different approach to get database properties
+			return c.getPropertiesWithButtonWorkaround(ctx, dbID)
+		}
 		return nil, fmt.Errorf("failed to get database: %w", err)
 	}
 
@@ -287,10 +293,112 @@ func (c *Client) GetDatabaseProperties(ctx context.Context, dbType string) (map[
 
 	// Copy all properties from the DB response
 	for key, prop := range db.Properties {
+		// Skip button properties which might cause issues
+		if propType := prop.GetType(); propType == "button" {
+			log.Printf("Skipping button property '%s' to avoid API errors", key)
+			continue
+		}
 		properties[key] = prop
 	}
 
 	// Cache the result with 10 minute expiry
+	c.dbCache[dbID] = properties
+	c.dbCacheExpiry[dbID] = time.Now().Add(10 * time.Minute)
+
+	return properties, nil
+}
+
+// getPropertiesWithButtonWorkaround is a fallback method to get database properties
+// when the standard approach fails due to button properties
+func (c *Client) getPropertiesWithButtonWorkaround(ctx context.Context, dbID string) (map[string]notionapi.PropertyConfig, error) {
+	log.Printf("Using workaround to retrieve database properties while ignoring button properties")
+
+	// Query the database to get one page - this avoids the direct database fetch error
+	queryRequest := &notionapi.DatabaseQueryRequest{
+		PageSize: 1,
+	}
+
+	response, err := c.client.Database.Query(ctx, notionapi.DatabaseID(dbID), queryRequest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query database: %w", err)
+	}
+
+	// Create a map to store property configurations
+	properties := make(map[string]notionapi.PropertyConfig)
+
+	// If we got a page, use its properties to determine the schema
+	if len(response.Results) > 0 {
+		page := response.Results[0]
+
+		// Process each property to create a property config
+		for key, prop := range page.Properties {
+			// Skip button properties
+			if prop.GetType() == "button" {
+				log.Printf("Skipping button property '%s'", key)
+				continue
+			}
+
+			// Create a basic property config based on the type
+			var config notionapi.PropertyConfig
+
+			switch prop.GetType() {
+			case "title":
+				config = &notionapi.TitlePropertyConfig{
+					Type: notionapi.PropertyConfigTypeTitle,
+				}
+			case "rich_text":
+				config = &notionapi.RichTextPropertyConfig{
+					Type: notionapi.PropertyConfigTypeRichText,
+				}
+			case "number":
+				config = &notionapi.NumberPropertyConfig{
+					Type: notionapi.PropertyConfigTypeNumber,
+				}
+			case "select":
+				config = &notionapi.SelectPropertyConfig{
+					Type: notionapi.PropertyConfigTypeSelect,
+					Select: notionapi.Select{
+						Options: []notionapi.Option{},
+					},
+				}
+			case "multi_select":
+				config = &notionapi.MultiSelectPropertyConfig{
+					Type: notionapi.PropertyConfigTypeMultiSelect,
+					MultiSelect: notionapi.Select{
+						Options: []notionapi.Option{},
+					},
+				}
+			case "date":
+				config = &notionapi.DatePropertyConfig{
+					Type: notionapi.PropertyConfigTypeDate,
+				}
+			case "checkbox":
+				config = &notionapi.CheckboxPropertyConfig{
+					Type: notionapi.PropertyConfigTypeCheckbox,
+				}
+			case "url":
+				config = &notionapi.URLPropertyConfig{
+					Type: notionapi.PropertyConfigTypeURL,
+				}
+			case "email":
+				config = &notionapi.EmailPropertyConfig{
+					Type: notionapi.PropertyConfigTypeEmail,
+				}
+			case "phone_number":
+				config = &notionapi.PhoneNumberPropertyConfig{
+					Type: notionapi.PropertyConfigTypePhoneNumber,
+				}
+			default:
+				// Skip unsupported property types
+				log.Printf("Skipping unsupported property type: %s for property %s", prop.GetType(), key)
+				continue
+			}
+
+			properties[key] = config
+		}
+	}
+
+	// Cache the properties
 	c.dbCache[dbID] = properties
 	c.dbCacheExpiry[dbID] = time.Now().Add(10 * time.Minute)
 
