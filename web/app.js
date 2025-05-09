@@ -581,6 +581,16 @@ async function checkDatabaseAvailability() {
 async function loadProjects() {
   const projectsSection = document.getElementById('projectsSection');
   const projectsContainer = projectsSection.querySelector('.projects-container');
+  
+  // Create filter section if it doesn't exist
+  let filterSection = projectsSection.querySelector('.projects-filter');
+  if (!filterSection) {
+    filterSection = document.createElement('div');
+    filterSection.className = 'projects-filter';
+    projectsSection.insertBefore(filterSection, projectsContainer);
+  }
+  
+  // Reset the container
   projectsContainer.innerHTML = '<div class="loading-indicator">Loading projects...</div>';
   
   try {
@@ -599,30 +609,10 @@ async function loadProjects() {
       return;
     }
     
-    // Detailed logging of first project structure
-    if (projects.length > 0) {
-      console.log('First project detailed structure:');
-      console.log(JSON.stringify(projects[0], null, 2));
-    }
-    
-    // Debug: Log each project's status
-    console.log('Project status values:');
-    projects.forEach(project => {
-      console.log(`Project "${project.name || 'Unnamed'}": status="${project.status || 'undefined'}", type:${typeof project.status}`);
-    });
-    
-    projectsContainer.innerHTML = '';
-    
-    // Define status categories and their display names
-    const statusCategories = {
-      'not started': 'Not started',
-      'in progress': 'In progress',
-      'done': 'Done'
-    };
-    
     // Group projects by normalized status
     const projectsByStatus = {};
-    
+    let availableStatuses = [];
+
     // Extract the status from a Notion project object
     function extractProjectStatus(project) {
       let status = '';
@@ -706,156 +696,278 @@ async function loadProjects() {
       // Create the status bucket if it doesn't exist
       if (!projectsByStatus[normalizedStatus]) {
         projectsByStatus[normalizedStatus] = [];
+        // Track available statuses (excluding "done" which we'll handle separately)
+        if (normalizedStatus !== 'done') {
+          availableStatuses.push(normalizedStatus);
+        }
       }
       
       // Add the project to its status bucket
       projectsByStatus[normalizedStatus].push(project);
     });
     
-    // Log the categorized projects
+    // Add "done" at the end if it exists
+    if (projectsByStatus['done'] && projectsByStatus['done'].length > 0) {
+      availableStatuses.push('done');
+    }
+    
     console.log('Projects by status category:', Object.keys(projectsByStatus));
     
-    // Define the order in which to display status columns
-    const statusOrder = ['not started', 'in progress', 'done', 'other'];
+    // Create filter buttons
+    renderProjectFilters(filterSection, projectsByStatus, availableStatuses);
     
-    // Create columns in the desired order
-    statusOrder.forEach(statusKey => {
-      if (!projectsByStatus[statusKey] || projectsByStatus[statusKey].length === 0) {
-        return; // Skip empty status categories
-      }
-      
-      // Get display name for the status
-      const displayName = statusCategories[statusKey] || 'Other';
-      
-      // Determine column class based on status
-      let columnClass = 'status-column';
-      if (statusKey === 'not started') {
-        columnClass += ' not-started';
-      } else if (statusKey === 'in progress') {
-        columnClass += ' in-progress';
-      } else if (statusKey === 'done') {
-        columnClass += ' done';
-      }
-      
-      const statusColumn = document.createElement('div');
-      statusColumn.className = columnClass;
-      
-      // Create column header with count
-      const statusHeader = document.createElement('div');
-      statusHeader.className = 'status-header';
-      statusHeader.innerHTML = `
-        <div>${displayName}</div>
-        <div class="status-count">${projectsByStatus[statusKey].length}</div>
-      `;
-      statusColumn.appendChild(statusHeader);
-      
-      // Create project list
-      const projectList = document.createElement('ul');
-      projectList.className = 'project-list';
-      
-      // Extract the name from a Notion project object
-      function extractProjectName(project) {
-        if (project.name) {
-          return project.name;
-        }
-        
-        if (project.properties) {
-          const props = project.properties;
-          
-          // Try different property names for the title
-          const titleKeys = ['Project name', 'Name', 'Title', 'project name', 'name', 'title'];
-          
-          for (const key of titleKeys) {
-            if (props[key]) {
-              const prop = props[key];
-              
-              if (typeof prop === 'string') {
-                return prop;
-              } else if (typeof prop === 'object') {
-                // Handle complex title object
-                if (prop.title && Array.isArray(prop.title) && prop.title.length > 0) {
-                  if (prop.title[0].plain_text) {
-                    return prop.title[0].plain_text;
-                  } else if (prop.title[0].text && prop.title[0].text.content) {
-                    return prop.title[0].text.content;
-                  }
-                }
-                
-                // Try other common paths
-                if (prop.text && typeof prop.text === 'string') {
-                  return prop.text;
-                }
-              }
-            }
-          }
-        }
-        
-        return 'Untitled Project';
-      }
-
-      // Add each project to the list
-      projectsByStatus[statusKey].forEach(project => {
-        const projectItem = document.createElement('li');
-        projectItem.className = 'project-item';
-        
-        // Get project name from helper function
-        const projectName = extractProjectName(project);
-        
-        // Create project details
-        let projectHTML = `
-          <div class="project-title">
-            <a href="${project.url}" target="_blank">${projectName}</a>
-          </div>
-          <div class="project-meta">
-        `;
-        
-        // Add priority if available
-        let priority = '';
-        if (project.priority) {
-          priority = project.priority;
-        } else if (project.properties && project.properties.Priority) {
-          priority = project.properties.Priority;
-        }
-        
-        if (priority) {
-          let priorityClass = 'low';
-          if (priority.toLowerCase().includes('high')) {
-            priorityClass = 'high';
-          } else if (priority.toLowerCase().includes('med')) {
-            priorityClass = 'medium';
-          }
-          
-          projectHTML += `
-            <div class="project-priority ${priorityClass}">${priority}</div>
-          `;
-        }
-        
-        // Add end date if available
-        let endDate = '';
-        if (project.end_date) {
-          endDate = project.end_date;
-        } else if (project.properties && project.properties['End date']) {
-          endDate = project.properties['End date'];
-        }
-        
-        if (endDate) {
-          projectHTML += `
-            <div class="project-date">${endDate}</div>
-          `;
-        }
-        
-        projectHTML += `</div>`;
-        projectItem.innerHTML = projectHTML;
-        projectList.appendChild(projectItem);
-      });
-      
-      statusColumn.appendChild(projectList);
-      projectsContainer.appendChild(statusColumn);
-    });
+    // Render the projects based on current filter
+    renderFilteredProjects(projectsContainer, projectsByStatus);
     
   } catch (error) {
     console.error('Error loading projects:', error);
     projectsContainer.innerHTML = `<div class="error-message">Error loading projects: ${error.message}</div>`;
+  }
+}
+
+// Create filter buttons for project statuses
+function renderProjectFilters(container, projectsByStatus, availableStatuses) {
+  // Clear the filter container
+  container.innerHTML = '';
+  
+  // Create a title for the filter section
+  const filterTitle = document.createElement('div');
+  filterTitle.className = 'filter-title';
+  filterTitle.textContent = 'Filter by status:';
+  container.appendChild(filterTitle);
+  
+  // Create a filter button group
+  const filterButtons = document.createElement('div');
+  filterButtons.className = 'filter-buttons';
+  
+  // "All" button (excluding done)
+  const allButton = document.createElement('button');
+  allButton.className = 'filter-btn active'; // Default active
+  allButton.dataset.filter = 'all';
+  allButton.textContent = 'All active';
+  allButton.addEventListener('click', () => toggleProjectFilter(allButton, 'all'));
+  filterButtons.appendChild(allButton);
+  
+  // Define status display names and their buttons
+  const statusNames = {
+    'not started': 'Not started',
+    'in progress': 'In progress',
+    'other': 'Other',
+    'done': 'Done'
+  };
+  
+  // Create a button for each available status
+  availableStatuses.forEach(status => {
+    if (projectsByStatus[status] && projectsByStatus[status].length > 0) {
+      const button = document.createElement('button');
+      button.className = 'filter-btn';
+      button.dataset.filter = status;
+      // Add a count badge
+      button.innerHTML = `${statusNames[status] || status.charAt(0).toUpperCase() + status.slice(1)} <span class="count-badge">${projectsByStatus[status].length}</span>`;
+      button.addEventListener('click', () => toggleProjectFilter(button, status));
+      filterButtons.appendChild(button);
+    }
+  });
+  
+  container.appendChild(filterButtons);
+  
+  // Store current filter in a data attribute on the container
+  container.dataset.currentFilter = 'all';
+}
+
+// Toggle project filter and update the display
+function toggleProjectFilter(button, filter) {
+  // Get the filter container
+  const filterContainer = button.closest('.projects-filter');
+  const projectsContainer = document.querySelector('.projects-container');
+  
+  // Remove active class from all buttons
+  const buttons = filterContainer.querySelectorAll('.filter-btn');
+  buttons.forEach(btn => btn.classList.remove('active'));
+  
+  // Add active class to the clicked button
+  button.classList.add('active');
+  
+  // Store the current filter
+  filterContainer.dataset.currentFilter = filter;
+  
+  // Update the project display
+  const projectsByStatus = window.projectsData || {};
+  renderFilteredProjects(projectsContainer, projectsByStatus);
+}
+
+// Render projects based on the current filter
+function renderFilteredProjects(container, projectsByStatus) {
+  // Store projects data globally for filtering without refetching
+  window.projectsData = projectsByStatus;
+  
+  // Clear the container
+  container.innerHTML = '';
+  
+  // Get current filter
+  const filterContainer = document.querySelector('.projects-filter');
+  const currentFilter = filterContainer ? filterContainer.dataset.currentFilter : 'all';
+  
+  // Define the order in which to display status columns
+  const statusOrder = ['not started', 'in progress', 'other', 'done'];
+  
+  // Define status categories and their display names
+  const statusCategories = {
+    'not started': 'Not started',
+    'in progress': 'In progress',
+    'done': 'Done',
+    'other': 'Other'
+  };
+  
+  // Filter the statuses to display based on the current filter
+  let statusesToDisplay = [];
+  
+  if (currentFilter === 'all') {
+    // Show all statuses except "done" by default
+    statusesToDisplay = statusOrder.filter(status => status !== 'done');
+  } else {
+    // Show only the selected status
+    statusesToDisplay = [currentFilter];
+  }
+  
+  // Create columns in the desired order
+  statusesToDisplay.forEach(statusKey => {
+    if (!projectsByStatus[statusKey] || projectsByStatus[statusKey].length === 0) {
+      return; // Skip empty status categories
+    }
+    
+    // Get display name for the status
+    const displayName = statusCategories[statusKey] || statusKey.charAt(0).toUpperCase() + statusKey.slice(1);
+    
+    // Determine column class based on status
+    let columnClass = 'status-column';
+    if (statusKey === 'not started') {
+      columnClass += ' not-started';
+    } else if (statusKey === 'in progress') {
+      columnClass += ' in-progress';
+    } else if (statusKey === 'done') {
+      columnClass += ' done';
+    }
+    
+    const statusColumn = document.createElement('div');
+    statusColumn.className = columnClass;
+    
+    // Create column header with count
+    const statusHeader = document.createElement('div');
+    statusHeader.className = 'status-header';
+    statusHeader.innerHTML = `
+      <div>${displayName}</div>
+      <div class="status-count">${projectsByStatus[statusKey].length}</div>
+    `;
+    statusColumn.appendChild(statusHeader);
+    
+    // Create project list
+    const projectList = document.createElement('ul');
+    projectList.className = 'project-list';
+    
+    // Extract the name from a Notion project object
+    function extractProjectName(project) {
+      if (project.name) {
+        return project.name;
+      }
+      
+      if (project.properties) {
+        const props = project.properties;
+        
+        // Try different property names for the title
+        const titleKeys = ['Project name', 'Name', 'Title', 'project name', 'name', 'title'];
+        
+        for (const key of titleKeys) {
+          if (props[key]) {
+            const prop = props[key];
+            
+            if (typeof prop === 'string') {
+              return prop;
+            } else if (typeof prop === 'object') {
+              // Handle complex title object
+              if (prop.title && Array.isArray(prop.title) && prop.title.length > 0) {
+                if (prop.title[0].plain_text) {
+                  return prop.title[0].plain_text;
+                } else if (prop.title[0].text && prop.title[0].text.content) {
+                  return prop.title[0].text.content;
+                }
+              }
+              
+              // Try other common paths
+              if (prop.text && typeof prop.text === 'string') {
+                return prop.text;
+              }
+            }
+          }
+        }
+      }
+      
+      return 'Untitled Project';
+    }
+
+    // Add each project to the list
+    projectsByStatus[statusKey].forEach(project => {
+      const projectItem = document.createElement('li');
+      projectItem.className = 'project-item';
+      
+      // Get project name from helper function
+      const projectName = extractProjectName(project);
+      
+      // Create project details
+      let projectHTML = `
+        <div class="project-title">
+          <a href="${project.url}" target="_blank">${projectName}</a>
+        </div>
+        <div class="project-meta">
+      `;
+      
+      // Add priority if available
+      let priority = '';
+      if (project.priority) {
+        priority = project.priority;
+      } else if (project.properties && project.properties.Priority) {
+        priority = project.properties.Priority;
+      }
+      
+      if (priority) {
+        let priorityClass = 'low';
+        if (priority.toLowerCase().includes('high')) {
+          priorityClass = 'high';
+        } else if (priority.toLowerCase().includes('med')) {
+          priorityClass = 'medium';
+        }
+        
+        projectHTML += `
+          <div class="project-priority ${priorityClass}">${priority}</div>
+        `;
+      }
+      
+      // Add end date if available
+      let endDate = '';
+      if (project.end_date) {
+        endDate = project.end_date;
+      } else if (project.properties && project.properties['End date']) {
+        endDate = project.properties['End date'];
+      }
+      
+      if (endDate) {
+        projectHTML += `
+          <div class="project-date">${endDate}</div>
+        `;
+      }
+      
+      projectHTML += `</div>`;
+      projectItem.innerHTML = projectHTML;
+      projectList.appendChild(projectItem);
+    });
+    
+    statusColumn.appendChild(projectList);
+    container.appendChild(statusColumn);
+  });
+  
+  // If no visible projects found after filtering
+  if (container.children.length === 0) {
+    container.innerHTML = '<div class="no-tasks">No projects found with the current filter</div>';
   }
 }
 
