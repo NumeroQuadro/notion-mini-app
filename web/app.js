@@ -598,37 +598,70 @@ async function loadProjects() {
     
     projectsContainer.innerHTML = '';
     
-    // Group projects by status
+    // Define status categories and their display names
+    const statusCategories = {
+      'not started': 'Not started',
+      'in progress': 'In progress',
+      'done': 'Done'
+    };
+    
+    // Group projects by normalized status
     const projectsByStatus = {};
+    
+    // First pass: categorize projects into standard status buckets
     projects.forEach(project => {
-      const status = project.status || 'No Status';
-      if (!projectsByStatus[status]) {
-        projectsByStatus[status] = [];
+      let projectStatus = project.status ? project.status.toLowerCase() : '';
+      let normalizedStatus = 'other';
+      
+      // Map various status terms to our standard categories
+      if (projectStatus.includes('not') || projectStatus.includes('todo') || projectStatus.includes('backlog')) {
+        normalizedStatus = 'not started';
+      } else if (projectStatus.includes('progress') || projectStatus.includes('doing') || projectStatus.includes('working')) {
+        normalizedStatus = 'in progress';
+      } else if (projectStatus.includes('done') || projectStatus.includes('complete') || projectStatus.includes('finished')) {
+        normalizedStatus = 'done';
       }
-      projectsByStatus[status].push(project);
+      
+      // Create the status bucket if it doesn't exist
+      if (!projectsByStatus[normalizedStatus]) {
+        projectsByStatus[normalizedStatus] = [];
+      }
+      
+      // Add the project to its status bucket
+      projectsByStatus[normalizedStatus].push(project);
     });
     
-    // Create columns for each status
-    for (const [status, statusProjects] of Object.entries(projectsByStatus)) {
+    // Define the order in which to display status columns
+    const statusOrder = ['not started', 'in progress', 'done', 'other'];
+    
+    // Create columns in the desired order
+    statusOrder.forEach(statusKey => {
+      if (!projectsByStatus[statusKey] || projectsByStatus[statusKey].length === 0) {
+        return; // Skip empty status categories
+      }
+      
+      // Get display name for the status
+      const displayName = statusCategories[statusKey] || 'Other';
+      
       // Determine column class based on status
       let columnClass = 'status-column';
-      if (status.toLowerCase().includes('not') || status.toLowerCase().includes('todo')) {
+      if (statusKey === 'not started') {
         columnClass += ' not-started';
-      } else if (status.toLowerCase().includes('progress') || status.toLowerCase().includes('doing')) {
+      } else if (statusKey === 'in progress') {
         columnClass += ' in-progress';
-      } else if (status.toLowerCase().includes('done') || status.toLowerCase().includes('complete')) {
+      } else if (statusKey === 'done') {
         columnClass += ' done';
       }
       
       const statusColumn = document.createElement('div');
       statusColumn.className = columnClass;
       
-      // Create column header
+      // Create column header with count
       const statusHeader = document.createElement('div');
       statusHeader.className = 'status-header';
       statusHeader.innerHTML = `
-        <div>${status}</div>
-        <div class="status-count">${statusProjects.length}</div>
+        <div>${displayName}</div>
+        <div class="status-count">${projectsByStatus[statusKey].length}</div>
       `;
       statusColumn.appendChild(statusHeader);
       
@@ -637,7 +670,7 @@ async function loadProjects() {
       projectList.className = 'project-list';
       
       // Add each project to the list
-      statusProjects.forEach(project => {
+      projectsByStatus[statusKey].forEach(project => {
         const projectItem = document.createElement('li');
         projectItem.className = 'project-item';
         
@@ -677,7 +710,7 @@ async function loadProjects() {
       
       statusColumn.appendChild(projectList);
       projectsContainer.appendChild(statusColumn);
-    }
+    });
     
   } catch (error) {
     console.error('Error loading projects:', error);
