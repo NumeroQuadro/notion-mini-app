@@ -166,9 +166,6 @@ async function buildForm(){
       // Skip properties with "button" in their name to avoid potential issues
       if(key.toLowerCase().includes('button')) continue;
       
-      // Skip the "Description" property since we already have a dedicated field for it
-      if(key.toLowerCase() === 'description') continue;
-      
       // Get renderer for this property type or default to text input
       const render = renderers[cfg.type] || renderers.text;
       const field = render(key, cfg);
@@ -212,16 +209,9 @@ async function handleSubmit(e){
       throw Error("Title is required");
     }
     
-    // Get description field
-    const description = form.get('description');
-    if(description && description.trim()) {
-      // Add description as a property
-      props["Description"] = description.trim();
-    }
-    
     // Process form data according to schema types
     for(const [k,v] of form){
-      if(k === 'taskTitle' || k === 'description') continue;
+      if(k === 'taskTitle') continue;
       
       // If no schema or property not in schema, skip
       if(!schema || !schema[k]) continue;
@@ -285,12 +275,7 @@ async function handleSubmit(e){
       }
     } catch (apiError) {
       console.error("API error:", apiError);
-      // Show a more user-friendly message for API errors
-      if (apiError.message && apiError.message.includes("validation")) {
-        showMessage("The description might be too long or contain unsupported formatting. Try simplifying it.", true);
-      } else {
-        showMessage('Error: ' + apiError.message, true);
-      }
+      showMessage('Error saving to Notion. Please try again.', true);
     }
   } catch(err) {
     console.error("Form error:", err);

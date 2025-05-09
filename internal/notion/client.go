@@ -124,6 +124,7 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 			"Name": notionapi.TitleProperty{
 				Title: []notionapi.RichText{
 					{
+						Type: notionapi.ObjectType("text"),
 						Text: &notionapi.Text{
 							Content: title,
 						},
@@ -131,27 +132,6 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 				},
 			},
 		},
-		Children: []notionapi.Block{},
-	}
-
-	// Check if description is provided in properties
-	if descVal, ok := properties["Description"]; ok {
-		if descStr, ok := descVal.(string); ok && descStr != "" {
-			// Add description as a rich text property
-			page.Properties["Description"] = notionapi.RichTextProperty{
-				RichText: []notionapi.RichText{
-					{
-						Type: notionapi.ObjectType("text"),
-						Text: &notionapi.Text{
-							Content: descStr,
-						},
-					},
-				},
-			}
-
-			// Remove from regular properties since we've handled it
-			delete(properties, "Description")
-		}
 	}
 
 	// Add custom properties - but filter out button properties
