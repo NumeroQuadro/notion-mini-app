@@ -37,6 +37,11 @@
                     <div class="tile-title">Recent Tasks</div>
                     <div class="tile-description">View and complete recent tasks</div>
                 </div>
+                <div class="tile projects-tile" data-action="projects">
+                    <div class="tile-icon">📊</div>
+                    <div class="tile-title">Projects</div>
+                    <div class="tile-description">View and manage your projects</div>
+                </div>
             </div>
         </div>
 
@@ -75,6 +80,17 @@
             <div class="tasks-list" id="tasksList">
                 <!-- Recent tasks will be loaded here -->
                 <div class="loading-indicator">Loading recent tasks...</div>
+            </div>
+        </div>
+        
+        <!-- Projects section -->
+        <div id="projectsSection" style="display: none;">
+            <div class="section-header">
+                <h2>Projects</h2>
+            </div>
+            <div class="projects-container">
+                <!-- Status columns will be added dynamically -->
+                <div class="loading-indicator">Loading projects...</div>
             </div>
         </div>
     </div>

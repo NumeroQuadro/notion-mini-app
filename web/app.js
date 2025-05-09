@@ -101,7 +101,7 @@ async function fetchSchema(dbType = "tasks"){
       } else if (data && Object.keys(data).length > 0) {
         // Regular response format
         schemaCache[dbType] = data;
-      } else {
+        } else {
         console.warn("Schema response empty or invalid:", data);
         // Return empty schema as fallback
         schemaCache[dbType] = {};
@@ -167,7 +167,7 @@ async function buildForm(){
     const schema = await fetchSchema(currentDbType);
     const container = document.getElementById('propertiesContainer');
     container.innerHTML = '';
-    
+
     // Clear error container
     const errorContainer = document.getElementById('error-container');
     if (errorContainer) errorContainer.style.display = 'none';
@@ -275,7 +275,7 @@ async function handleSubmit(e){
       switch(type) {
         case 'checkbox':
           props[k] = e.target[k].checked;
-          break;
+                break;
         case 'multi_select':
           const values = form.getAll(k);
           if(values.length > 0) {
@@ -285,12 +285,12 @@ async function handleSubmit(e){
             } else {
               props[k] = values;
             }
-          }
-          break;
-        case 'number':
+                }
+                break;
+            case 'number':
           if(v) props[k] = parseFloat(v);
-          break;
-        default:
+                break;
+            default:
           if(v) props[k] = v;
       }
     }
@@ -403,9 +403,9 @@ async function loadRecentTasks() {
     
     if (tasks.length === 0) {
       tasksList.innerHTML = '<div class="no-tasks">No tasks found matching criteria</div>';
-      return;
-    }
-    
+            return;
+        }
+        
     tasksList.innerHTML = '';
     
     // Create a task list
@@ -555,8 +555,8 @@ async function checkDatabaseAvailability() {
     if (config.HAS_JOURNAL_DB !== "true") {
       const journalTile = document.querySelector('.journal-tile');
       if (journalTile) journalTile.style.display = 'none';
-    }
-  } catch (error) {
+        }
+    } catch (error) {
     console.error("Error checking database availability:", error);
     showWarning("Could not check database availability");
   }
@@ -570,8 +570,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   await checkDatabaseAvailability();
   
   // Setup form submission
-  document.getElementById('taskForm').addEventListener('submit', handleSubmit);
+    document.getElementById('taskForm').addEventListener('submit', handleSubmit);
   
   // Start on the home screen
   navigateTo('home');
-});
+}); 

@@ -48,6 +48,7 @@ type Client struct {
 	taskDbID      string
 	notesDbID     string
 	journalDbID   string
+	projectsDbID  string
 	dbCache       map[string]map[string]notionapi.PropertyConfig
 	dbCacheExpiry map[string]time.Time
 }
@@ -57,6 +58,7 @@ func NewClient() *Client {
 	taskDbID := os.Getenv("NOTION_TASKS_DATABASE_ID")
 	notesDbID := os.Getenv("NOTION_NOTES_DATABASE_ID")
 	journalDbID := os.Getenv("NOTION_JOURNAL_DATABASE_ID")
+	projectsDbID := os.Getenv("NOTION_PROJECTS_DATABASE_ID")
 
 	if apiToken == "" {
 		log.Printf("WARNING: NOTION_API_KEY environment variable is not set")
@@ -78,6 +80,10 @@ func NewClient() *Client {
 		log.Printf("WARNING: NOTION_JOURNAL_DATABASE_ID environment variable is not set")
 	}
 
+	if projectsDbID == "" {
+		log.Printf("WARNING: NOTION_PROJECTS_DATABASE_ID environment variable is not set")
+	}
+
 	// Create standard Notion client
 	client := notionapi.NewClient(notionapi.Token(apiToken))
 
@@ -86,6 +92,7 @@ func NewClient() *Client {
 		taskDbID:      taskDbID,
 		notesDbID:     notesDbID,
 		journalDbID:   journalDbID,
+		projectsDbID:  projectsDbID,
 		dbCache:       make(map[string]map[string]notionapi.PropertyConfig),
 		dbCacheExpiry: make(map[string]time.Time),
 	}
@@ -101,6 +108,10 @@ func (c *Client) GetNotesDatabaseID() string {
 
 func (c *Client) GetJournalDatabaseID() string {
 	return c.journalDbID
+}
+
+func (c *Client) GetProjectsDatabaseID() string {
+	return c.projectsDbID
 }
 
 func (c *Client) CreateTask(ctx context.Context, title string, properties map[string]interface{}, dbType string) error {
@@ -269,6 +280,8 @@ func (c *Client) getDbIDForType(dbType string) string {
 		return c.taskDbID
 	case "journal":
 		return c.journalDbID
+	case "projects":
+		return c.projectsDbID
 	default:
 		// Default to tasks database for backward compatibility
 		return c.taskDbID
@@ -864,4 +877,126 @@ func (c *Client) UpdateTaskStatus(taskID string, status string, properties map[s
 
 	log.Printf("Successfully updated task %s status to %s", taskID, status)
 	return nil
+}
+
+// GetProjects retrieves projects from Notion
+func (c *Client) GetProjects(ctx context.Context) ([]map[string]interface{}, error) {
+	dbID := c.projectsDbID
+	if dbID == "" {
+		return nil, fmt.Errorf("projects database ID not configured")
+	}
+
+	// Create database query to get all projects
+	queryRequest := &notionapi.DatabaseQueryRequest{
+		Sorts: []notionapi.SortObject{
+			{
+				Property:  "End date",  // Sort by end date
+				Direction: "ascending", // Show approaching deadlines first
+			},
+		},
+	}
+
+	// Query the database
+	response, err := c.client.Database.Query(ctx, notionapi.DatabaseID(dbID), queryRequest)
+	if err != nil {
+		// Handle button property error gracefully
+		if strings.Contains(err.Error(), "unsupported property type: button") {
+			log.Printf("Warning: Button property detected during projects query.")
+			return nil, fmt.Errorf("button properties detected, not supported for projects view")
+		}
+		return nil, fmt.Errorf("failed to query projects: %w", err)
+	}
+
+	// Transform the results to a simplified format for the frontend
+	projects := make([]map[string]interface{}, 0, len(response.Results))
+
+	// Transform each page into a project
+	for _, page := range response.Results {
+		project := map[string]interface{}{
+			"id":         string(page.ID),
+			"url":        page.URL,
+			"properties": make(map[string]interface{}),
+		}
+
+		// Extract title from Project name property
+		if titleProp, ok := page.Properties["Project name"]; ok {
+			if title, ok := titleProp.(*notionapi.TitleProperty); ok && len(title.Title) > 0 {
+				project["name"] = title.Title[0].PlainText
+			}
+		} else if titleProp, ok := page.Properties["Name"]; ok {
+			if title, ok := titleProp.(*notionapi.TitleProperty); ok && len(title.Title) > 0 {
+				project["name"] = title.Title[0].PlainText
+			}
+		}
+
+		// Extract status
+		if statusProp, ok := page.Properties["Status"]; ok {
+			if status, ok := statusProp.(*notionapi.SelectProperty); ok && status.Select.Name != "" {
+				project["status"] = status.Select.Name
+			}
+		}
+
+		// Extract priority
+		if priorityProp, ok := page.Properties["Priority"]; ok {
+			if priority, ok := priorityProp.(*notionapi.SelectProperty); ok && priority.Select.Name != "" {
+				project["priority"] = priority.Select.Name
+			}
+		}
+
+		// Extract end date
+		if dateProp, ok := page.Properties["End date"]; ok {
+			if date, ok := dateProp.(*notionapi.DateProperty); ok && date.Date != nil && date.Date.Start != nil {
+				// Create string from notionapi.Date
+				startTime := time.Time(*date.Date.Start)
+				project["end_date"] = startTime.Format("02/01/2006") // DD/MM/YYYY format
+			}
+		}
+
+		// Add other properties that might be useful
+		projectProps := make(map[string]interface{})
+		for key, prop := range page.Properties {
+			if key == "Project name" || key == "Name" || key == "Status" || key == "Priority" || key == "End date" {
+				continue // Already handled above
+			}
+
+			// Skip button properties
+			if prop.GetType() == "button" {
+				continue
+			}
+
+			switch prop.GetType() {
+			case "select":
+				if selectProp, ok := prop.(*notionapi.SelectProperty); ok && selectProp.Select.Name != "" {
+					projectProps[key] = selectProp.Select.Name
+				}
+			case "multi_select":
+				if multiSelectProp, ok := prop.(*notionapi.MultiSelectProperty); ok {
+					tags := make([]string, 0, len(multiSelectProp.MultiSelect))
+					for _, opt := range multiSelectProp.MultiSelect {
+						tags = append(tags, opt.Name)
+					}
+					projectProps[key] = tags
+				}
+			case "date":
+				if dateProp, ok := prop.(*notionapi.DateProperty); ok && dateProp.Date != nil && dateProp.Date.Start != nil {
+					// Create string from notionapi.Date
+					startTime := time.Time(*dateProp.Date.Start)
+					projectProps[key] = startTime.Format("02/01/2006")
+				}
+			case "number":
+				if numProp, ok := prop.(*notionapi.NumberProperty); ok {
+					projectProps[key] = numProp.Number
+				}
+			case "checkbox":
+				if checkboxProp, ok := prop.(*notionapi.CheckboxProperty); ok {
+					projectProps[key] = checkboxProp.Checkbox
+				}
+			}
+		}
+
+		project["properties"] = projectProps
+		projects = append(projects, project)
+	}
+
+	return projects, nil
 }

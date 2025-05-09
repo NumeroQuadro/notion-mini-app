@@ -701,4 +701,126 @@ select[multiple] {
     .tiles-container {
         grid-template-columns: repeat(2, 1fr);
     }
+}
+
+/* Projects section styles */
+.projects-container {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 16px;
+    padding-bottom: 16px;
+    margin-top: 20px;
+}
+
+.status-column {
+    min-width: 280px;
+    background-color: var(--tg-theme-bg-color, #fff);
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    flex-shrink: 0;
+}
+
+.status-header {
+    padding: 12px 16px;
+    font-size: 16px;
+    font-weight: 600;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.status-count {
+    background-color: rgba(0, 0, 0, 0.05);
+    border-radius: 12px;
+    padding: 2px 8px;
+    font-size: 12px;
+    color: #666;
+}
+
+.project-list {
+    padding: 8px;
+    list-style: none;
+    margin: 0;
+}
+
+.project-item {
+    background-color: var(--tg-theme-bg-color, #fff);
+    border: 1px solid #eee;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 8px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.project-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.1);
+}
+
+.project-title {
+    font-weight: 600;
+    font-size: 15px;
+    margin-bottom: 8px;
+}
+
+.project-title a {
+    color: var(--tg-theme-button-color, #2481cc);
+    text-decoration: none;
+}
+
+.project-title a:hover {
+    text-decoration: underline;
+}
+
+.project-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.project-priority, .project-date {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.project-priority.high {
+    background-color: rgba(235, 87, 87, 0.1);
+    color: #eb5757;
+}
+
+.project-priority.medium {
+    background-color: rgba(242, 153, 74, 0.1);
+    color: #f2994a;
+}
+
+.project-priority.low {
+    background-color: rgba(39, 174, 96, 0.1);
+    color: #27ae60;
+}
+
+.project-date {
+    background-color: rgba(0, 0, 0, 0.05);
+    color: #666;
+}
+
+/* Status column colors */
+.status-column.not-started .status-header {
+    background-color: rgba(235, 236, 237, 0.5);
+    color: #37352f;
+}
+
+.status-column.in-progress .status-header {
+    background-color: rgba(221, 237, 234, 0.5);
+    color: #0b6e99;
+}
+
+.status-column.done .status-header {
+    background-color: rgba(219, 237, 219, 0.5);
+    color: #0f7b6c;
 } 

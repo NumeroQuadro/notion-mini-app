@@ -108,6 +108,7 @@ func serveStaticFiles() {
 	http.HandleFunc("/notion/mini-app/api/properties", handleProperties)
 	http.HandleFunc("/notion/mini-app/api/log", handleLogs)
 	http.HandleFunc("/notion/mini-app/api/recent-tasks", handleRecentTasks)
+	http.HandleFunc("/notion/mini-app/api/projects", handleProjects)
 	http.HandleFunc("/notion/mini-app/api/update-task-status", handleUpdateTaskStatus)
 
 	// Simple config endpoint that returns environment variables as JSON
@@ -169,6 +170,7 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 	hasTasksDb := notionClient.GetTasksDatabaseID() != ""
 	hasNotesDb := notionClient.GetNotesDatabaseID() != ""
 	hasJournalDb := notionClient.GetJournalDatabaseID() != ""
+	hasProjectsDb := notionClient.GetProjectsDatabaseID() != ""
 
 	if hasTasksDb {
 		config["HAS_TASKS_DB"] = "true"
@@ -188,23 +190,32 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 		config["HAS_JOURNAL_DB"] = "false"
 	}
 
+	if hasProjectsDb {
+		config["HAS_PROJECTS_DB"] = "true"
+	} else {
+		config["HAS_PROJECTS_DB"] = "false"
+	}
+
 	// Add sensitive info only in non-production environments
 	if !isProd {
 		notionKey := os.Getenv("NOTION_API_KEY")
 		tasksDbID := notionClient.GetTasksDatabaseID()
 		notesDbID := notionClient.GetNotesDatabaseID()
 		journalDbID := notionClient.GetJournalDatabaseID()
+		projectsDbID := notionClient.GetProjectsDatabaseID()
 
 		// Log available keys (without exposing their values)
 		log.Printf("Config: NOTION_API_KEY available: %v", notionKey != "")
 		log.Printf("Config: NOTION_TASKS_DATABASE_ID available: %v", tasksDbID != "")
 		log.Printf("Config: NOTION_NOTES_DATABASE_ID available: %v", notesDbID != "")
 		log.Printf("Config: NOTION_JOURNAL_DATABASE_ID available: %v", journalDbID != "")
+		log.Printf("Config: NOTION_PROJECTS_DATABASE_ID available: %v", projectsDbID != "")
 
 		config["NOTION_API_KEY"] = notionKey
 		config["NOTION_TASKS_DATABASE_ID"] = tasksDbID
 		config["NOTION_NOTES_DATABASE_ID"] = notesDbID
 		config["NOTION_JOURNAL_DATABASE_ID"] = journalDbID
+		config["NOTION_PROJECTS_DATABASE_ID"] = projectsDbID
 	}
 
 	// Return configuration as JSON
@@ -688,4 +699,57 @@ func handleUpdateTaskStatus(w http.ResponseWriter, r *http.Request) {
 		"status":  "success",
 		"message": "Task status updated successfully",
 	})
+}
+
+// Handler for fetching projects
+func handleProjects(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Projects API called from: %s", r.RemoteAddr)
+
+	// Set CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Handle preflight OPTIONS request
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Set content type for the response
+	w.Header().Set("Content-Type", "application/json")
+
+	// Helper function for error responses
+	sendJSONError := func(statusCode int, message string) {
+		w.WriteHeader(statusCode)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": message,
+		})
+	}
+
+	// Only process GET requests
+	if r.Method != http.MethodGet {
+		sendJSONError(http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// Initialize Notion client
+	notionClient := notion.NewClient()
+
+	// Create a context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// Get projects from Notion
+	projects, err := notionClient.GetProjects(ctx)
+	if err != nil {
+		sendJSONError(http.StatusInternalServerError, fmt.Sprintf("Failed to get projects: %v", err))
+		return
+	}
+
+	// Return projects as JSON
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(projects); err != nil {
+		log.Printf("Error encoding projects: %v", err)
+	}
 }
