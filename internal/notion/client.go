@@ -620,28 +620,26 @@ func (c *Client) GetRecentTasks(ctx context.Context, dbType string, limit int) (
 
 	// Create database query filter
 	filter := &notionapi.DatabaseQueryRequest{
-		Filter: &notionapi.CompoundFilter{
-			And: []notionapi.Filter{
-				// Filter for status not being "done"
-				notionapi.PropertyFilter{
-					Property: "status",
-					Select: &notionapi.SelectFilterCondition{
-						DoesNotEqual: "done",
-					},
+		Filter: notionapi.AndCompoundFilter{
+			// Filter for status not being "done"
+			notionapi.PropertyFilter{
+				Property: "status",
+				Select: &notionapi.SelectFilterCondition{
+					DoesNotEqual: "done",
 				},
-				// Filter for empty Date
-				notionapi.PropertyFilter{
-					Property: "Date",
-					Date: &notionapi.DateFilterCondition{
-						IsEmpty: true,
-					},
+			},
+			// Filter for empty Date
+			notionapi.PropertyFilter{
+				Property: "Date",
+				Date: &notionapi.DateFilterCondition{
+					IsEmpty: true,
 				},
-				// Filter for tags not containing "sometimes-later"
-				notionapi.PropertyFilter{
-					Property: "Tags",
-					MultiSelect: &notionapi.MultiSelectFilterCondition{
-						DoesNotContain: "sometimes-later",
-					},
+			},
+			// Filter for tags not containing "sometimes-later"
+			notionapi.PropertyFilter{
+				Property: "Tags",
+				MultiSelect: &notionapi.MultiSelectFilterCondition{
+					DoesNotContain: "sometimes-later",
 				},
 			},
 		},
@@ -684,7 +682,7 @@ func (c *Client) transformPageToTask(page notionapi.Page) (Task, error) {
 	task := Task{
 		ID:         string(page.ID),
 		URL:        page.URL,
-		CreatedAt:  *page.CreatedTime,
+		CreatedAt:  page.CreatedTime,
 		Properties: make(map[string]interface{}),
 	}
 
