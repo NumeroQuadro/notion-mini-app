@@ -306,10 +306,93 @@ function setupTabs() {
       currentDbType = this.getAttribute('data-db-type');
       console.log(`Switched to ${currentDbType} database`);
       
-      // Rebuild form for this database type
-      await buildForm();
+      const tabId = this.getAttribute('id');
+      
+      // Show/hide sections based on selected tab
+      if (tabId === 'recentTasksTab') {
+        document.getElementById('formSection').style.display = 'none';
+        document.getElementById('recentTasksSection').style.display = 'block';
+        
+        // Load recent tasks
+        loadRecentTasks();
+      } else {
+        document.getElementById('formSection').style.display = 'block';
+        document.getElementById('recentTasksSection').style.display = 'none';
+        
+        // Rebuild form for this database type
+        await buildForm();
+      }
     });
   });
+}
+
+// Fetch and display recent tasks
+async function loadRecentTasks() {
+  const tasksList = document.getElementById('tasksList');
+  tasksList.innerHTML = '<div class="loading-indicator">Loading recent tasks...</div>';
+  
+  try {
+    const response = await fetch('/notion/mini-app/api/recent-tasks?db_type=tasks');
+    if (!response.ok) {
+      throw new Error('Failed to fetch recent tasks');
+    }
+    
+    const tasks = await response.json();
+    
+    if (tasks.length === 0) {
+      tasksList.innerHTML = '<div class="no-tasks">No tasks found matching criteria</div>';
+      return;
+    }
+    
+    tasksList.innerHTML = '';
+    
+    // Create a task list
+    const taskList = document.createElement('ul');
+    taskList.className = 'task-list';
+    
+    // Add each task to the list
+    tasks.forEach(task => {
+      const taskItem = document.createElement('li');
+      taskItem.className = 'task-item';
+      
+      // Create task title with link
+      const taskTitle = document.createElement('a');
+      taskTitle.href = task.url;
+      taskTitle.target = '_blank';
+      taskTitle.textContent = task.title;
+      
+      // Add task properties that might be useful to display
+      let taskDetails = '';
+      if (task.properties.status) {
+        taskDetails += `<div class="task-status">Status: ${task.properties.status}</div>`;
+      }
+      if (task.properties.Tags && Array.isArray(task.properties.Tags)) {
+        taskDetails += `<div class="task-tags">Tags: ${task.properties.Tags.join(', ')}</div>`;
+      }
+      
+      // Add created date
+      const createdDate = new Date(task.created_at);
+      const formattedDate = createdDate.toLocaleDateString() + ' ' + createdDate.toLocaleTimeString();
+      
+      taskItem.innerHTML = `
+        <div class="task-header">
+          <div class="task-title">${taskTitle.outerHTML}</div>
+          <div class="task-date">Created: ${formattedDate}</div>
+        </div>
+        <div class="task-properties">
+          ${taskDetails}
+        </div>
+      `;
+      
+      taskList.appendChild(taskItem);
+    });
+    
+    tasksList.appendChild(taskList);
+    
+  } catch (error) {
+    console.error('Error loading recent tasks:', error);
+    tasksList.innerHTML = `<div class="error-message">Error loading tasks: ${error.message}</div>`;
+  }
 }
 
 // Check database availability from config
