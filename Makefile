@@ -39,6 +39,9 @@ docker-run: docker-build
 	-e HOST=$(HOST) \
 	-p 8080:8080 \
 	-p 443:443 \
+	-v /etc/letsencrypt/live/tralalero-tralala.ru/fullchain.pem:/app/certs/fullchain.pem:ro \
+  	-v /etc/letsencrypt/live/tralalero-tralala.ru/privkey.pem:/app/certs/privkey.pem:ro \
+
 	notion-mini-app
 
 docker-stop:

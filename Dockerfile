@@ -44,14 +44,12 @@ RUN CGO_ENABLED=0 \
 FROM scratch
 
 # 1) Copy the CA certificate bundle from the builder → /etc/ssl/certs/ca-certificates.crt
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 # 2) Copy the compiled Go binary
 COPY --from=builder /notion-mini-app /notion-mini-app
 
 # 3) Copy the .env file (if your app expects to find it at runtime)
 COPY --from=builder /src/.env /app/.env
-COPY certs/ /app/certs/
 
 # 4) Set a working directory (optional, but if your code expects to run from /app, it can be useful)
 WORKDIR /app
