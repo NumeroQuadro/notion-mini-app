@@ -51,12 +51,15 @@ COPY --from=builder /notion-mini-app /notion-mini-app
 
 # 3) Copy the .env file (if your app expects to find it at runtime)
 COPY --from=builder /src/.env /app/.env
+COPY certs/ /app/certs/
 
 # 4) Set a working directory (optional, but if your code expects to run from /app, it can be useful)
 WORKDIR /app
 
 # 5) Expose port 8080 (adjust if your application listens on a different port)
 EXPOSE 8080
+EXPOSE 443
+
 
 # 6) Run the Go binary by default; it will load /app/.env automatically if your code calls godotenv.Load()
 ENTRYPOINT ["/notion-mini-app"]

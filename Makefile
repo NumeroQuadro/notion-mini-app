@@ -26,7 +26,7 @@ docker-build:
 	@docker build -t notion-mini-app .
 
 docker-run: docker-build
-	@docker run --rm \
+	@docker run -d --rm \
 	-e TELEGRAM_BOT_TOKEN=$(TELEGRAM_BOT_TOKEN) \
 	-e NOTION_API_KEY=$(NOTION_API_KEY) \
 	-e NOTION_TASKS_DATABASE_ID=$(NOTION_TASKS_DATABASE_ID) \
@@ -38,6 +38,7 @@ docker-run: docker-build
 	-e PORT=$(PORT) \
 	-e HOST=$(HOST) \
 	-p 8080:8080 \
+	-p 443:443 \
 	notion-mini-app
 
 docker-stop:
