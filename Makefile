@@ -24,8 +24,8 @@ docker-run: docker-build
 	@if [ -f .env ]; then \
 		docker run -d --rm --name notion-mini-app \
 		--env-file .env \
-		-p 8080:8080 \
-		-p 443:443 \
+		-p 8081:8080 \
+		-p 8443:443 \
 		-v /etc/letsencrypt/live/tralalero-tralala.ru/fullchain.pem:/app/certs/fullchain.pem:ro \
 		-v /etc/letsencrypt/live/tralalero-tralala.ru/privkey.pem:/app/certs/privkey.pem:ro \
 		notion-mini-app; \
