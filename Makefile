@@ -8,16 +8,11 @@ GO_FILES=$(wildcard *.go)
 DOCKER_IMAGE=notion-mini-app
 DOCKER_TAG=latest
 
-TELEGRAM_BOT_TOKEN=
-NOTION_API_KEY=
-NOTION_TASKS_DATABASE_ID=
-NOTION_NOTES_DATABASE_ID=
-NOTION_JOURNAL_DATABASE_ID=
-NOTION_PROJECTS_DATABASE_ID=
-MINI_APP_URL=
-AUTHORIZED_USER_ID=
-PORT=8080
-HOST=
+# Load environment variables from .env file
+ifneq (,$(wildcard ./.env))
+    include .env
+    export
+endif
 
 all: lint build
 
@@ -26,22 +21,18 @@ docker-build:
 	@docker build -t notion-mini-app .
 
 docker-run: docker-build
-	@docker run -d --rm --name notion-mini-app \
-	-e TELEGRAM_BOT_TOKEN=$(TELEGRAM_BOT_TOKEN) \
-	-e NOTION_API_KEY=$(NOTION_API_KEY) \
-	-e NOTION_TASKS_DATABASE_ID=$(NOTION_TASKS_DATABASE_ID) \
-	-e NOTION_NOTES_DATABASE_ID=$(NOTION_NOTES_DATABASE_ID) \
-	-e NOTION_JOURNAL_DATABASE_ID=$(NOTION_JOURNAL_DATABASE_ID) \
-	-e NOTION_PROJECTS_DATABASE_ID=$(NOTION_PROJECTS_DATABASE_ID) \
-	-e MINI_APP_URL=$(MINI_APP_URL) \
-	-e AUTHORIZED_USER_ID=$(AUTHORIZED_USER_ID) \
-	-e PORT=$(PORT) \
-	-e HOST=$(HOST) \
-	-p 8080:8080 \
-	-p 443:443 \
-	-v /etc/letsencrypt/live/tralalero-tralala.ru/fullchain.pem:/app/certs/fullchain.pem:ro \
-	-v /etc/letsencrypt/live/tralalero-tralala.ru/privkey.pem:/app/certs/privkey.pem:ro \
-	notion-mini-app
+	@if [ -f .env ]; then \
+		docker run -d --rm --name notion-mini-app \
+		--env-file .env \
+		-p 8080:8080 \
+		-p 443:443 \
+		-v /etc/letsencrypt/live/tralalero-tralala.ru/fullchain.pem:/app/certs/fullchain.pem:ro \
+		-v /etc/letsencrypt/live/tralalero-tralala.ru/privkey.pem:/app/certs/privkey.pem:ro \
+		notion-mini-app; \
+	else \
+		@echo "Error: .env file not found. Please create one from .env.example."; \
+		exit 1; \
+	fi
 
 docker-logs:
 	@echo "Getting Docker container logs..."
