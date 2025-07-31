@@ -242,13 +242,6 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 		}
 	}
 
-	// Set default status to "To Do"
-	page.Properties["status"] = notionapi.StatusProperty{
-		Status: notionapi.Option{
-			Name: "to do",
-		},
-	}
-
 	log.Printf("Sending create page request to Notion API")
 	creationStart := time.Now()
 
