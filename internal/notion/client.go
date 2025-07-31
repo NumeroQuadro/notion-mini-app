@@ -170,7 +170,7 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 		log.Printf("Processing property: %s = %v", key, value)
 
 		// Skip known button properties or properties that might be buttons
-		if key == "complete" || key == "status" || key == "done" || key == "button" ||
+		if key == "complete" || key == "done" || key == "button" ||
 			key == "checkbox" || strings.Contains(strings.ToLower(key), "button") {
 			log.Printf("Skipping known button-like property: %s", key)
 			continue
@@ -240,6 +240,13 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 			// Handle text properties as default
 			c.handleTextProperty(page, key, value)
 		}
+	}
+
+	// Set default status to "To Do"
+	page.Properties["status"] = notionapi.StatusProperty{
+		Status: notionapi.Option{
+			Name: "to do",
+		},
 	}
 
 	log.Printf("Sending create page request to Notion API")
@@ -859,8 +866,8 @@ func (c *Client) UpdateTaskStatus(taskID string, status string, properties map[s
 	}
 
 	// Add status property
-	updateRequest.Properties["status"] = notionapi.SelectProperty{
-		Select: notionapi.Option{
+	updateRequest.Properties["status"] = notionapi.StatusProperty{
+		Status: notionapi.Option{
 			Name: status,
 		},
 	}
