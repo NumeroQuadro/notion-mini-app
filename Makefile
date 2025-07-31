@@ -26,7 +26,7 @@ docker-build:
 	@docker build -t notion-mini-app .
 
 docker-run: docker-build
-	@docker run -d --rm \
+	@docker run -d --rm --name notion-mini-app \
 	-e TELEGRAM_BOT_TOKEN=$(TELEGRAM_BOT_TOKEN) \
 	-e NOTION_API_KEY=$(NOTION_API_KEY) \
 	-e NOTION_TASKS_DATABASE_ID=$(NOTION_TASKS_DATABASE_ID) \
@@ -42,6 +42,10 @@ docker-run: docker-build
 	-v /etc/letsencrypt/live/tralalero-tralala.ru/fullchain.pem:/app/certs/fullchain.pem:ro \
 	-v /etc/letsencrypt/live/tralalero-tralala.ru/privkey.pem:/app/certs/privkey.pem:ro \
 	notion-mini-app
+
+docker-logs:
+	@echo "Getting Docker container logs..."
+	@docker logs -f notion-mini-app
 
 docker-stop:
 	@echo "Stopping Docker container..."
