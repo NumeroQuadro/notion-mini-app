@@ -82,6 +82,10 @@ func main() {
 	// Initialize bot handler
 	handler := bot.NewHandler(botAPI, notionClient, geminiClient, db)
 
+	// Set global variables for webhook handler (BEFORE scheduler setup)
+	globalHandler = handler
+	globalBot = botAPI
+
 	// Get authorized user ID for scheduler
 	authorizedUserIDInt, err := strconv.ParseInt(authorizedUserID, 10, 64)
 	if err != nil {
@@ -105,10 +109,6 @@ func main() {
 	} else {
 		log.Printf("Scheduler disabled (database or authorized user not configured)")
 	}
-
-	// Set global variables for webhook handler
-	globalHandler = handler
-	globalBot = botAPI
 
 	// Check if we should use webhook or polling
 	webhookURL := os.Getenv("WEBHOOK_URL")
