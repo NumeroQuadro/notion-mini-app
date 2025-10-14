@@ -1,6 +1,6 @@
 FROM golang:1.24-alpine AS builder
 
-RUN apk add --no-cache git ca-certificates
+RUN apk add --no-cache git ca-certificates gcc musl-dev sqlite-dev
 
 WORKDIR /src
 
@@ -9,14 +9,14 @@ RUN go mod download
 
 COPY . ./
 
-RUN CGO_ENABLED=0 \
+RUN CGO_ENABLED=1 \
     GOOS=linux \
     go build -o /notion-mini-app ./cmd/main.go
 
 # Use minimal alpine image for final stage
 FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates tzdata
+RUN apk --no-cache add ca-certificates tzdata sqlite-libs
 
 WORKDIR /app
 
@@ -25,6 +25,9 @@ COPY --from=builder /notion-mini-app /app/notion-mini-app
 
 # Copy the web directory (CRITICAL - bot needs this!)
 COPY --from=builder /src/web /app/web
+
+# Create data directory for SQLite database
+RUN mkdir -p /app/data && chmod 755 /app/data
 
 EXPOSE 8080
 EXPOSE 443
