@@ -15,7 +15,6 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/jomei/notionapi"
 	"github.com/numero_quadro/notion-mini-app/internal/bot"
-	"github.com/numero_quadro/notion-mini-app/internal/database"
 	"github.com/numero_quadro/notion-mini-app/internal/gemini"
 	"github.com/numero_quadro/notion-mini-app/internal/notion"
 	"github.com/numero_quadro/notion-mini-app/internal/scheduler"
@@ -55,21 +54,6 @@ func main() {
 	// Initialize Gemini client
 	geminiClient := gemini.NewClient()
 
-	// Initialize database
-	dbPath := os.Getenv("DATABASE_PATH")
-	if dbPath == "" {
-		dbPath = "./data/tasks.db" // Default path
-	}
-	db, err := database.NewDB(dbPath)
-	if err != nil {
-		log.Printf("Warning: Failed to initialize database: %v", err)
-		log.Printf("Task tagging and notifications will be disabled")
-		db = nil
-	}
-	if db != nil {
-		defer db.Close()
-	}
-
 	// Initialize Telegram bot
 	botAPI, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
@@ -80,7 +64,7 @@ func main() {
 	log.Printf("Authorized on account %s", botAPI.Self.UserName)
 
 	// Initialize bot handler
-	handler := bot.NewHandler(botAPI, notionClient, geminiClient, db)
+	handler := bot.NewHandler(botAPI, notionClient, geminiClient)
 
 	// Set global variables for webhook handler (BEFORE scheduler setup)
 	globalHandler = handler
@@ -93,12 +77,12 @@ func main() {
 		authorizedUserIDInt = 0
 	}
 
-	// Start scheduler if database and user ID are configured
-	if db != nil && authorizedUserIDInt != 0 {
+	// Start scheduler if user ID is configured
+	if authorizedUserIDInt != 0 {
 		schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
 		defer schedulerCancel()
 
-		schedulerInstance := scheduler.NewScheduler(db, notionClient, botAPI, authorizedUserIDInt, "23:00")
+		schedulerInstance := scheduler.NewScheduler(notionClient, botAPI, authorizedUserIDInt, "23:00")
 		globalScheduler = schedulerInstance
 
 		// Link scheduler to handler for /cron command
@@ -107,7 +91,7 @@ func main() {
 		go schedulerInstance.Start(schedulerCtx)
 		log.Printf("Scheduler started")
 	} else {
-		log.Printf("Scheduler disabled (database or authorized user not configured)")
+		log.Printf("Scheduler disabled (authorized user not configured)")
 	}
 
 	// Check if we should use webhook or polling

@@ -53,7 +53,7 @@ func NewClient() *Client {
 
 	return &Client{
 		apiKey: apiKey,
-		model:  "gemini-2.0-flash-exp", // Using latest flash model
+		model:  "gemini-2.0-flash-lite", // Using lite model for better rate limits
 	}
 }
 
@@ -69,7 +69,7 @@ func (c *Client) TagTask(taskContent string) (string, error) {
 Rules:
 - If the entry is ONLY a URL/link (starts with http, https, or looks like a web link), respond with exactly: "link"
 - If the entry mentions thoughts, emotions, observations, feelings, reflections, or is a personal journal-style entry, respond with exactly: "journal"
-- If the entry mentions a deadline, date reference (like "today", "tomorrow", "next week", "23 october", "by friday", "due on", etc.), respond with exactly: "date"
+- If the entry mentions a deadline, date reference (like "today", "tomorrow", "next week", "23 october", "by friday", "due on", etc.) OR mentions university/college subjects, courses, homework, assignments, exams, or academic tasks, respond with exactly: "date"
 - If none of the above apply, respond with exactly: "task"
 
 Task entry: "%s"

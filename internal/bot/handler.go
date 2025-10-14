@@ -12,7 +12,6 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/numero_quadro/notion-mini-app/internal/database"
 	"github.com/numero_quadro/notion-mini-app/internal/gemini"
 	"github.com/numero_quadro/notion-mini-app/internal/notion"
 )
@@ -27,7 +26,6 @@ type Handler struct {
 	bot              *tgbotapi.BotAPI
 	notion           *notion.Client
 	gemini           *gemini.Client
-	db               *database.DB
 	scheduler        Scheduler
 	authorizedUserID int64                          // Only this user can interact with the bot
 	pendingTasks     map[int64]map[int]*PendingTask // Track pending tasks by user ID and message ID
@@ -38,7 +36,7 @@ type Scheduler interface {
 	RunManualCheck()
 }
 
-func NewHandler(bot *tgbotapi.BotAPI, notionClient *notion.Client, geminiClient *gemini.Client, db *database.DB) *Handler {
+func NewHandler(bot *tgbotapi.BotAPI, notionClient *notion.Client, geminiClient *gemini.Client) *Handler {
 	// Get authorized user ID from environment variable
 	authorizedUserIDStr := os.Getenv("AUTHORIZED_USER_ID")
 	var authorizedUserID int64 = 0
@@ -62,7 +60,6 @@ func NewHandler(bot *tgbotapi.BotAPI, notionClient *notion.Client, geminiClient 
 		bot:              bot,
 		notion:           notionClient,
 		gemini:           geminiClient,
-		db:               db,
 		scheduler:        nil, // Set later via SetScheduler
 		authorizedUserID: authorizedUserID,
 		pendingTasks:     make(map[int64]map[int]*PendingTask),
@@ -295,8 +292,8 @@ func (h *Handler) HandleMessageReaction(reaction *MessageReactionUpdate) error {
 		return err
 	}
 
-	// Task created successfully - now tag it with Gemini and store in database
-	if h.gemini != nil && h.db != nil {
+	// Task created successfully - now tag it with Gemini and store in Notion
+	if h.gemini != nil {
 		go func() {
 			// Get LLM tag from Gemini
 			tag, err := h.gemini.TagTask(pendingTask.Text)
@@ -305,13 +302,13 @@ func (h *Handler) HandleMessageReaction(reaction *MessageReactionUpdate) error {
 				tag = "task" // Default tag on error
 			}
 
-			// Store in database
-			if err := h.db.StoreTaskMetadata(taskID, pendingTask.Text, tag); err != nil {
-				log.Printf("Warning: Failed to store task metadata for %s: %v", taskID, err)
+			// Store tag in Notion's llm_tag property
+			if err := h.notion.UpdateTaskLLMTag(taskID, tag); err != nil {
+				log.Printf("Warning: Failed to update llm_tag in Notion for %s: %v", taskID, err)
 			}
 		}()
 	} else {
-		log.Printf("Gemini or database not configured, skipping task metadata storage")
+		log.Printf("Gemini not configured, skipping task tagging")
 	}
 
 	// Success - set thumbs up (try multiple times to ensure it's visible)

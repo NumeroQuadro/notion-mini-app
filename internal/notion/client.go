@@ -889,6 +889,34 @@ func (c *Client) GetPage(ctx context.Context, pageID string) (*notionapi.Page, e
 	return page, nil
 }
 
+// UpdateTaskLLMTag updates the llm_tag property in Notion
+func (c *Client) UpdateTaskLLMTag(taskID, tag string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	updateRequest := &notionapi.PageUpdateRequest{
+		Properties: notionapi.Properties{
+			"llm_tag": notionapi.RichTextProperty{
+				RichText: []notionapi.RichText{
+					{
+						Text: &notionapi.Text{
+							Content: tag,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := c.client.Page.Update(ctx, notionapi.PageID(taskID), updateRequest)
+	if err != nil {
+		return fmt.Errorf("failed to update llm_tag: %w", err)
+	}
+
+	log.Printf("Updated llm_tag='%s' for task %s", tag, taskID)
+	return nil
+}
+
 // GetProjects retrieves projects from Notion
 func (c *Client) GetProjects(ctx context.Context) ([]map[string]interface{}, error) {
 	dbID := c.projectsDbID

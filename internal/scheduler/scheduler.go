@@ -8,12 +8,10 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/jomei/notionapi"
-	"github.com/numero_quadro/notion-mini-app/internal/database"
 	"github.com/numero_quadro/notion-mini-app/internal/notion"
 )
 
 type Scheduler struct {
-	db               *database.DB
 	notionClient     *notion.Client
 	bot              *tgbotapi.BotAPI
 	authorizedUserID int64
@@ -21,13 +19,12 @@ type Scheduler struct {
 }
 
 // NewScheduler creates a new scheduler instance
-func NewScheduler(db *database.DB, notionClient *notion.Client, bot *tgbotapi.BotAPI, authorizedUserID int64, checkTime string) *Scheduler {
+func NewScheduler(notionClient *notion.Client, bot *tgbotapi.BotAPI, authorizedUserID int64, checkTime string) *Scheduler {
 	if checkTime == "" {
 		checkTime = "23:00" // Default to 11 PM
 	}
 
 	return &Scheduler{
-		db:               db,
 		notionClient:     notionClient,
 		bot:              bot,
 		authorizedUserID: authorizedUserID,
@@ -68,34 +65,34 @@ func (s *Scheduler) RunManualCheck() {
 func (s *Scheduler) checkTasks(ctx context.Context) {
 	log.Printf("Starting task check...")
 
-	// Get tasks from the last 24 hours
-	since := time.Now().Add(-24 * time.Hour)
-	tasks, err := s.db.GetTasksSince(since)
+	// Query ALL non-done tasks from Notion (not just last 24h from local DB)
+	tasks, err := s.notionClient.GetRecentTasks(ctx, "tasks", 1000) // Get up to 1000 tasks
 	if err != nil {
-		log.Printf("Error retrieving tasks: %v", err)
+		log.Printf("Error retrieving tasks from Notion: %v", err)
 		return
 	}
 
-	log.Printf("Found %d tasks to check", len(tasks))
+	log.Printf("Found %d non-done tasks to check", len(tasks))
 
 	for _, task := range tasks {
-		// Check if task still exists in Notion
-		exists, hasDate, err := s.checkTaskInNotion(ctx, task.TaskID)
-		if err != nil {
-			log.Printf("Error checking task %s in Notion: %v", task.TaskID, err)
+		// Check if task has llm_tag property in Notion
+		llmTag, hasTag := task.Properties["llm_tag"].(string)
+		if !hasTag || llmTag == "" {
+			log.Printf("Task %s has no llm_tag, skipping", task.ID)
 			continue
 		}
 
-		if !exists {
-			// Task was deleted from Notion, remove from our database
-			log.Printf("Task %s no longer exists in Notion, removing from database", task.TaskID)
-			s.db.DeleteTask(task.TaskID)
-			continue
+		// Check if task has Date property
+		hasDate := false
+		if _, ok := task.Properties["Date"]; ok {
+			if dateStr, ok := task.Properties["Date"].(string); ok && dateStr != "" {
+				hasDate = true
+			}
 		}
 
 		// Send notifications based on tag
 		if err := s.sendNotification(task, hasDate); err != nil {
-			log.Printf("Error sending notification for task %s: %v", task.TaskID, err)
+			log.Printf("Error sending notification for task %s: %v", task.ID, err)
 		}
 	}
 
@@ -122,12 +119,13 @@ func (s *Scheduler) checkTaskInNotion(ctx context.Context, taskID string) (exist
 }
 
 // sendNotification sends appropriate notification based on task tag
-func (s *Scheduler) sendNotification(task database.TaskMetadata, hasDate bool) error {
+func (s *Scheduler) sendNotification(task notion.Task, hasDate bool) error {
 	var message string
-	taskPreview := truncateString(task.TaskTitle, 50)
-	taskURL := fmt.Sprintf("https://notion.so/%s", task.TaskID)
+	taskPreview := truncateString(task.Title, 50)
+	taskURL := fmt.Sprintf("https://notion.so/%s", task.ID)
+	llmTag := task.Properties["llm_tag"].(string)
 
-	switch task.LLMTag {
+	switch llmTag {
 	case "date":
 		if !hasDate {
 			message = fmt.Sprintf("⏰ Task with deadline has no date set!\n\n"+
@@ -166,7 +164,7 @@ func (s *Scheduler) sendNotification(task database.TaskMetadata, hasDate bool) e
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 
-	log.Printf("Sent notification for task %s (tag: %s)", task.TaskID, task.LLMTag)
+	log.Printf("Sent notification for task %s (tag: %s)", task.ID, llmTag)
 	return nil
 }
 
