@@ -23,7 +23,7 @@ docker-build:
 docker-run: docker-build
 	@if [ -f .env ]; then \
 		echo "Starting Docker container..."; \
-		docker run -d --rm --name notion-mini-app \
+		docker run -d --name notion-mini-app \
 		--env-file .env \
 		-p 8081:8080 \
 		-p 8443:443 \
@@ -37,11 +37,27 @@ docker-run: docker-build
 			echo "View logs with: make docker-logs"; \
 		else \
 			echo "❌ Container crashed! Showing logs:"; \
-			docker logs notion-mini-app 2>&1 || true; \
+			docker logs notion-mini-app 2>&1 || echo "Container was removed too quickly. Try: make docker-run-debug"; \
+			docker rm -f notion-mini-app 2>/dev/null || true; \
 			exit 1; \
 		fi; \
 	else \
 		echo "Error: .env file not found. Please create one from .env.example."; \
+		exit 1; \
+	fi
+
+docker-run-debug: docker-build
+	@echo "Running container in foreground for debugging..."
+	@echo "Press Ctrl+C to stop"
+	@echo "==========================================="
+	@if [ -f .env ]; then \
+		docker run --rm --name notion-mini-app-debug \
+		--env-file .env \
+		-p 8081:8080 \
+		-p 8443:443 \
+		notion-mini-app; \
+	else \
+		echo "Error: .env file not found."; \
 		exit 1; \
 	fi
 
@@ -66,7 +82,15 @@ docker-status:
 
 docker-stop:
 	@echo "Stopping Docker container..."
-	@docker stop notion-mini-app
+	@docker stop notion-mini-app 2>/dev/null || echo "Container not running"
+	@docker rm notion-mini-app 2>/dev/null || echo "Container already removed"
+
+docker-clean:
+	@echo "Cleaning up Docker containers and images..."
+	@docker stop notion-mini-app 2>/dev/null || true
+	@docker rm notion-mini-app 2>/dev/null || true
+	@docker rm notion-mini-app-debug 2>/dev/null || true
+	@echo "✅ Cleanup complete"
 
 docker-rm:
 	@echo "Deleting Docker container..."
