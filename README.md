@@ -2,7 +2,7 @@
 
 A Telegram bot that serves only for one user (its me hahaha) and allows to create and manage tasks in Notion databases directly from Telegram.
 
-**🎯 [Quick Start Guide](QUICKSTART.md)** | **📝 [Testing Guide](TESTING.md)** | **📋 [Changelog](CHANGELOG.md)**
+**🎯 [Quick Start Guide](QUICKSTART.md)** | **📝 [Testing Guide](TESTING.md)** | **🚀 [Deployment Guide](DEPLOYMENT.md)** | **📋 [Changelog](CHANGELOG.md)**
 
 ## Features
 
@@ -97,6 +97,9 @@ Use the "Open Mini App" button to:
 ### Important Notes
 
 - **Reactions require webhooks**: Telegram Bot API only sends message reactions via webhooks, not through long polling
+- **Use the same domain**: Your webhook URL should be on the same domain as your mini-app
+  - Example: If `MINI_APP_URL=https://tralalero-tralala.ru/notion/mini-app`
+  - Then `WEBHOOK_URL=https://tralalero-tralala.ru/telegram/webhook`
 - The bot uses long polling for regular messages and webhooks for reactions
 - Make sure your webhook URL is publicly accessible via HTTPS
 - You can get your Telegram User ID by messaging [@userinfobot](https://t.me/userinfobot)
