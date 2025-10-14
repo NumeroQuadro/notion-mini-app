@@ -170,10 +170,11 @@ func (s *Scheduler) sendNotification(task database.TaskMetadata, hasDate bool) e
 	return nil
 }
 
-// truncateString truncates a string to maxLen characters
+// truncateString truncates a string to maxLen characters (UTF-8 safe)
 func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	return string(runes[:maxLen]) + "..."
 }
