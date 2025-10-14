@@ -109,6 +109,11 @@ func (h *Handler) storePendingTask(message *tgbotapi.Message) {
 		MessageID: messageID,
 		Text:      message.Text,
 	}
+
+	// Set thinking emoji when message is received
+	if setErr := h.setMessageReaction(message.Chat.ID, messageID, "🤔"); setErr != nil {
+		log.Printf("Warning: Failed to set 🤔 reaction: %v", setErr)
+	}
 }
 
 func (h *Handler) handleStart(message *tgbotapi.Message) error {
@@ -252,13 +257,13 @@ func (h *Handler) HandleMessageReaction(reaction *MessageReactionUpdate) error {
 		return err
 	}
 
-	// Success - set checkmark (try multiple times to ensure it's visible)
+	// Success - set thumbs up (try multiple times to ensure it's visible)
 	for i := 0; i < 2; i++ {
-		if setErr := h.setMessageReaction(chatID, messageID, "✅"); setErr != nil {
-			log.Printf("Attempt %d: Failed to set ✅ reaction: %v", i+1, setErr)
+		if setErr := h.setMessageReaction(chatID, messageID, "👍"); setErr != nil {
+			log.Printf("Attempt %d: Failed to set 👍 reaction: %v", i+1, setErr)
 			time.Sleep(500 * time.Millisecond)
 		} else {
-			log.Printf("Successfully set ✅ reaction")
+			log.Printf("Successfully set 👍 reaction")
 			break
 		}
 	}
