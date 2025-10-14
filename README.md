@@ -2,7 +2,7 @@
 
 A Telegram bot that serves only for one user (its me hahaha) and allows to create and manage tasks in Notion databases directly from Telegram.
 
-**🎯 [Quick Start Guide](QUICKSTART.md)** | **📝 [Testing Guide](TESTING.md)** | **🚀 [Deployment Guide](DEPLOYMENT.md)** | **🔧 [Troubleshooting](TROUBLESHOOTING.md)** | **📋 [Changelog](CHANGELOG.md)**
+**🎯 [Quick Start Guide](QUICKSTART.md)** | **📝 [Testing Guide](TESTING.md)** | **🚀 [Deployment Guide](DEPLOYMENT.md)** | **🐳 [Docker Troubleshooting](DOCKER-TROUBLESHOOTING.md)** | **🔧 [Troubleshooting](TROUBLESHOOTING.md)** | **📋 [Changelog](CHANGELOG.md)**
 
 ## Features
 
@@ -147,6 +147,27 @@ The project uses:
 
 ## Deployment
 
+### Docker (Recommended for Production)
+
+```bash
+# Build and run with Docker
+make docker-build
+make docker-run
+
+# Check status
+make docker-status
+
+# View logs
+make docker-logs
+
+# Stop container
+make docker-stop
+```
+
+**Troubleshooting:** If container doesn't start, see [Docker Troubleshooting Guide](DOCKER-TROUBLESHOOTING.md)
+
+### Manual Setup
+
 A simple nginx setup script is included to help with deployment:
 
 ```bash
@@ -154,6 +175,29 @@ A simple nginx setup script is included to help with deployment:
 ```
 
 This will set up the necessary configuration for serving the mini app through Nginx.
+
+### Available Scripts
+
+| Script | Purpose |
+|--------|--------|
+| `setup-webhook.sh` | Configure Telegram webhook for reactions |
+| `delete-webhook.sh` | Remove webhook and switch to polling |
+| `add-webhook-to-nginx.sh` | Add webhook endpoint to existing nginx |
+| `diagnose-webhook.sh` | Diagnose webhook connectivity issues |
+| `start-production.sh` | Start bot with validation checks |
+| `nginx-setup.sh` | Full nginx configuration setup |
+
+**Quick Commands:**
+```bash
+# Start in production mode (with checks)
+./start-production.sh
+
+# Diagnose webhook issues
+./diagnose-webhook.sh
+
+# Setup webhook
+./setup-webhook.sh
+```
 
 ## License
 

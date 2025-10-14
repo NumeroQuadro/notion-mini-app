@@ -1,6 +1,6 @@
 # Troubleshooting: Webhook vs Polling Conflict
 
-## Error: "Conflict: can't use getUpdates method while webhook is active"
+## Error 1: "Conflict: can't use getUpdates method while webhook is active"
 
 This error occurs when:
 1. A webhook is configured in Telegram
@@ -129,3 +129,192 @@ The errors should stop, and you'll see:
 Running in WEBHOOK mode: https://tralalero-tralala.ru/telegram/webhook
 Authorized user ID: your_id
 ```
+
+---
+
+## Error 2: "Wrong response from the webhook: 502 Bad Gateway"
+
+### What It Means
+
+Telegram successfully reached your webhook URL, but got a 502 error. This means:
+- ✅ Webhook URL is correct
+- ✅ Domain/nginx is accessible
+- ❌ Backend application (bot) is not running or unreachable
+
+### Quick Diagnosis
+
+Run the diagnostic script:
+```bash
+./diagnose-webhook.sh
+```
+
+### Common Causes & Fixes
+
+#### 1. Bot is not running
+
+**Check:**
+```bash
+ps aux | grep notion-bot
+# or for Docker:
+docker-compose ps
+```
+
+**Fix:**
+```bash
+# If using systemd:
+sudo systemctl start notion-bot
+sudo systemctl status notion-bot
+
+# If using Docker:
+docker-compose up -d
+docker-compose logs -f
+
+# If running manually:
+./notion-bot
+```
+
+#### 2. Bot crashed or has errors
+
+**Check logs:**
+```bash
+# Systemd:
+sudo journalctl -u notion-bot -f
+
+# Docker:
+docker-compose logs -f notion-bot
+
+# Manual:
+./notion-bot 2>&1 | tee bot.log
+```
+
+**Common issues in logs:**
+- Missing `.env` file → Create it with required variables
+- Database connection errors → Check Notion API key
+- Port already in use → Change PORT in .env or stop conflicting service
+
+#### 3. WEBHOOK_URL not set in .env
+
+**Check:**
+```bash
+cat .env | grep WEBHOOK_URL
+```
+
+**Fix:**
+```bash
+echo "WEBHOOK_URL=https://tralalero-tralala.ru/telegram/webhook" >> .env
+```
+
+Then restart the bot.
+
+#### 4. Nginx can't reach the bot (port 8080)
+
+**Check if port 8080 is listening:**
+```bash
+netstat -tlnp | grep 8080
+# or
+ss -tlnp | grep 8080
+```
+
+**Test local endpoint:**
+```bash
+curl http://localhost:8080/telegram/webhook
+# Should return: 405 Method Not Allowed (this is correct!)
+```
+
+**If port is not listening:**
+- Bot is not running
+- Bot is listening on wrong port (check PORT in .env)
+- Firewall blocking the port
+
+#### 5. Nginx webhook location not configured
+
+**Check nginx config:**
+```bash
+grep -A 10 "/telegram/webhook" /etc/nginx/nginx.conf
+```
+
+**If not found, add it:**
+```bash
+sudo ./add-webhook-to-nginx.sh
+# or
+sudo ./nginx-setup.sh
+```
+
+**Reload nginx:**
+```bash
+sudo nginx -t  # Test configuration
+sudo systemctl reload nginx
+```
+
+### Step-by-Step Fix
+
+```bash
+# 1. Ensure .env has WEBHOOK_URL
+echo "WEBHOOK_URL=https://tralalero-tralala.ru/telegram/webhook" >> .env
+echo "AUTHORIZED_USER_ID=your_telegram_id" >> .env
+
+# 2. Rebuild the bot (if code changed)
+go build -o notion-bot cmd/main.go
+
+# 3. Start/restart the bot
+docker-compose up -d
+# or
+sudo systemctl restart notion-bot
+# or
+./notion-bot &
+
+# 4. Wait a few seconds, then check if it's running
+ps aux | grep notion-bot
+netstat -tlnp | grep 8080
+
+# 5. Test local webhook
+curl http://localhost:8080/telegram/webhook
+# Should return 405 Method Not Allowed
+
+# 6. Test public webhook
+curl https://tralalero-tralala.ru/telegram/webhook
+# Should also return 405
+
+# 7. Check Telegram webhook status
+curl "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getWebhookInfo" | jq .
+# Should show no errors and pending_update_count should decrease
+```
+
+### Expected Webhook Info (Healthy)
+
+```json
+{
+  "ok": true,
+  "result": {
+    "url": "https://tralalero-tralala.ru/telegram/webhook",
+    "has_custom_certificate": false,
+    "pending_update_count": 0,
+    "max_connections": 40,
+    "allowed_updates": ["message", "message_reaction"]
+  }
+}
+```
+
+Notice:
+- ✅ `pending_update_count: 0` (or small number)
+- ✅ No `last_error_date` or `last_error_message`
+- ✅ `allowed_updates` includes `message_reaction`
+
+### Verification
+
+1. **Send a test message** to your bot
+2. **Check bot logs** - you should see:
+   ```
+   Received webhook update: ...
+   Received message update via webhook
+   Stored message X as pending task: ...
+   ```
+3. **Add a reaction** to your message
+4. **Check bot logs** - you should see:
+   ```
+   Received message_reaction update: ...
+   Task created successfully: ...
+   ```
+5. **Bot should add ✅ reaction** to confirm
+
+---

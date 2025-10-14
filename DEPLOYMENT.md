@@ -90,6 +90,39 @@ Should show:
 
 ## Troubleshooting
 
+## Troubleshooting
+
+### 502 Bad Gateway Error
+
+If webhook info shows:
+```json
+{
+  "last_error_message": "Wrong response from the webhook: 502 Bad Gateway"
+}
+```
+
+**This means the bot is not running!**
+
+Quick fix:
+```bash
+# 1. Run diagnostics
+./diagnose-webhook.sh
+
+# 2. Ensure .env has WEBHOOK_URL
+echo "WEBHOOK_URL=https://tralalero-tralala.ru/telegram/webhook" >> .env
+
+# 3. Start the bot
+./start-production.sh
+# or with Docker:
+docker-compose up -d
+
+# 4. Verify it's running
+ps aux | grep notion-bot
+curl http://localhost:8080/telegram/webhook  # Should return 405
+```
+
+See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for detailed fixes.
+
 ### Webhook not receiving updates
 
 Check nginx logs:
