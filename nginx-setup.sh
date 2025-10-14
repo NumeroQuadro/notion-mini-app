@@ -103,6 +103,21 @@ http {
             proxy_read_timeout 60s;
             send_timeout 60s;
         }
+        
+        # Telegram webhook endpoint for receiving reactions
+        location /telegram/webhook {
+            proxy_pass http://localhost:$APP_PORT/telegram/webhook;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+            proxy_redirect off;
+            
+            # Telegram webhook timeouts
+            proxy_connect_timeout 10s;
+            proxy_send_timeout 10s;
+            proxy_read_timeout 10s;
+        }
     }
 }
 EOF

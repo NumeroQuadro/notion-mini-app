@@ -60,12 +60,18 @@ func main() {
 	// Initialize bot handler
 	handler := bot.NewHandler(botAPI, notionClient)
 
+	// Set global variables for webhook handler
+	globalHandler = handler
+	globalBot = botAPI
+
 	// Serve static files for mini app
 	go serveStaticFiles()
 
 	// Use polling for development
 	updateConfig := tgbotapi.NewUpdate(0)
 	updateConfig.Timeout = 60
+	// Enable message reaction updates
+	updateConfig.AllowedUpdates = []string{"message", "callback_query", "message_reaction"}
 
 	updates := botAPI.GetUpdatesChan(updateConfig)
 
@@ -77,12 +83,30 @@ func main() {
 				log.Printf("Error handling message: %v", err)
 			}
 		} else if update.CallbackQuery != nil {
-			// Handle callback queries (button clicks)
-			if err := handler.HandleCallback(update.CallbackQuery); err != nil {
-				log.Printf("Error handling callback: %v", err)
+			// Handle callback queries (button clicks) - keeping for mini app buttons
+			log.Printf("Received callback query: %s", update.CallbackQuery.Data)
+		} else {
+			// Try to parse message_reaction update manually
+			// The library doesn't support it directly, so we need to check RawData
+			if err := handleMessageReactionFromUpdate(update, handler); err != nil {
+				log.Printf("Error handling reaction: %v", err)
 			}
 		}
 	}
+}
+
+// handleMessageReactionFromUpdate extracts and handles message_reaction from update
+func handleMessageReactionFromUpdate(update tgbotapi.Update, handler *bot.Handler) error {
+	// Try to parse message_reaction from raw JSON
+	// The tgbotapi library v5.5.1 doesn't natively support message_reaction,
+	// but we can access it through reflection or custom unmarshaling
+
+	// For debugging: log the update ID to see if we're receiving reactions
+	if update.Message == nil && update.CallbackQuery == nil {
+		log.Printf("Received non-standard update: UpdateID=%d", update.UpdateID)
+	}
+
+	return nil
 }
 
 // Serve static files for the mini app
@@ -110,6 +134,9 @@ func serveStaticFiles() {
 	http.HandleFunc("/notion/mini-app/api/recent-tasks", handleRecentTasks)
 	http.HandleFunc("/notion/mini-app/api/projects", handleProjects)
 	http.HandleFunc("/notion/mini-app/api/update-task-status", handleUpdateTaskStatus)
+
+	// Telegram webhook endpoint for receiving reaction updates
+	http.HandleFunc("/telegram/webhook", createWebhookHandler())
 
 	// Simple config endpoint that returns environment variables as JSON
 	http.HandleFunc("/notion/mini-app/api/config", handleConfig)
@@ -751,5 +778,58 @@ func handleProjects(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(projects); err != nil {
 		log.Printf("Error encoding projects: %v", err)
+	}
+}
+
+// Global variable to store the bot handler for webhook
+var globalHandler *bot.Handler
+var globalBot *tgbotapi.BotAPI
+
+// createWebhookHandler creates a handler for Telegram webhook updates
+func createWebhookHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Parse the webhook update
+		var updateData map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&updateData); err != nil {
+			log.Printf("Error decoding webhook data: %v", err)
+			http.Error(w, "Bad request", http.StatusBadRequest)
+			return
+		}
+
+		log.Printf("Received webhook update: %+v", updateData)
+
+		// Check if this is a message_reaction update
+		if messageReactionData, ok := updateData["message_reaction"]; ok {
+			log.Printf("Received message_reaction update: %+v", messageReactionData)
+
+			// Parse the reaction update
+			reactionJSON, err := json.Marshal(messageReactionData)
+			if err != nil {
+				log.Printf("Error marshaling reaction data: %v", err)
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
+			var reaction bot.MessageReactionUpdate
+			if err := json.Unmarshal(reactionJSON, &reaction); err != nil {
+				log.Printf("Error unmarshaling reaction: %v", err)
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
+			// Handle the reaction
+			if globalHandler != nil {
+				if err := globalHandler.HandleMessageReaction(&reaction); err != nil {
+					log.Printf("Error handling reaction: %v", err)
+				}
+			}
+		}
+
+		w.WriteHeader(http.StatusOK)
 	}
 }

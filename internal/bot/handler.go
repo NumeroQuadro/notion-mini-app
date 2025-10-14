@@ -1,34 +1,30 @@
 package bot
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strconv"
-	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/numero_quadro/notion-mini-app/internal/notion"
 )
 
-// State constants for tracking user conversation state
-const (
-	StateNone                 = 0
-	StateAwaitingConfirmation = 1
-)
-
-// Store user states and pending tasks
-type UserState struct {
-	State       int
-	PendingTask string
+// Store pending tasks waiting for reaction
+type PendingTask struct {
+	MessageID int
+	Text      string
 }
 
 type Handler struct {
 	bot              *tgbotapi.BotAPI
 	notion           *notion.Client
-	authorizedUserID int64                // Only this user can interact with the bot
-	userStates       map[int64]*UserState // Track state for each user
+	authorizedUserID int64                          // Only this user can interact with the bot
+	pendingTasks     map[int64]map[int]*PendingTask // Track pending tasks by user ID and message ID
 }
 
 func NewHandler(bot *tgbotapi.BotAPI, notionClient *notion.Client) *Handler {
@@ -55,7 +51,7 @@ func NewHandler(bot *tgbotapi.BotAPI, notionClient *notion.Client) *Handler {
 		bot:              bot,
 		notion:           notionClient,
 		authorizedUserID: authorizedUserID,
-		userStates:       make(map[int64]*UserState),
+		pendingTasks:     make(map[int64]map[int]*PendingTask),
 	}
 }
 
@@ -78,31 +74,6 @@ func (h *Handler) HandleMessage(message *tgbotapi.Message) error {
 		return nil
 	}
 
-	// Get or initialize user state
-	state, exists := h.userStates[message.From.ID]
-	if !exists {
-		state = &UserState{State: StateNone}
-		h.userStates[message.From.ID] = state
-	}
-
-	// If we're awaiting confirmation, handle it
-	if state.State == StateAwaitingConfirmation {
-		// Check if message is a confirmation or decline
-		switch strings.ToLower(message.Text) {
-		case "yes", "y", "да", "д":
-			return h.createTaskFromPending(message)
-		case "no", "n", "нет", "н":
-			state.State = StateNone
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Task creation cancelled.")
-			_, err := h.bot.Send(msg)
-			return err
-		default:
-			// Any other message cancels the previous task and starts a new one
-			state.PendingTask = message.Text
-			return h.askForConfirmation(message)
-		}
-	}
-
 	// Handle regular commands
 	switch message.Text {
 	case "/start":
@@ -110,10 +81,10 @@ func (h *Handler) HandleMessage(message *tgbotapi.Message) error {
 	case "Open Mini App":
 		return h.handleMiniAppButton(message)
 	default:
-		// Any other text is treated as a potential task
-		state.PendingTask = message.Text
-		state.State = StateAwaitingConfirmation
-		return h.askForConfirmation(message)
+		// Any other text is treated as a potential task, stored and waiting for reaction
+		h.storePendingTask(message)
+		log.Printf("Stored message %d as pending task: %s", message.MessageID, message.Text)
+		return nil // Don't send any response, just wait for reaction
 	}
 }
 
@@ -123,44 +94,20 @@ func (h *Handler) handleUnauthorized(message *tgbotapi.Message) error {
 	return err
 }
 
-func (h *Handler) askForConfirmation(message *tgbotapi.Message) error {
-	state := h.userStates[message.From.ID]
+func (h *Handler) storePendingTask(message *tgbotapi.Message) {
+	userID := message.From.ID
+	messageID := message.MessageID
 
-	// Create inline keyboard for confirmation
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("Yes", "confirm_task"),
-			tgbotapi.NewInlineKeyboardButtonData("No", "cancel_task"),
-		),
-	)
-
-	msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Do you want to create a task with the following title?\n\n\"%s\"\n\nReply 'yes' or 'no', or send a new message to create a different task.", state.PendingTask))
-	msg.ReplyMarkup = keyboard
-	_, err := h.bot.Send(msg)
-	return err
-}
-
-func (h *Handler) createTaskFromPending(message *tgbotapi.Message) error {
-	state := h.userStates[message.From.ID]
-
-	// Create a Notion task
-	ctx := context.Background()
-	err := h.notion.CreateTask(ctx, state.PendingTask, nil, "tasks")
-
-	// Reset the state
-	state.State = StateNone
-
-	if err != nil {
-		// Send error message
-		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Failed to create task: %v", err))
-		_, sendErr := h.bot.Send(msg)
-		return sendErr
+	// Initialize map for user if it doesn't exist
+	if h.pendingTasks[userID] == nil {
+		h.pendingTasks[userID] = make(map[int]*PendingTask)
 	}
 
-	// Send success message
-	msg := tgbotapi.NewMessage(message.Chat.ID, "Task created successfully! ✅")
-	_, sendErr := h.bot.Send(msg)
-	return sendErr
+	// Store the pending task
+	h.pendingTasks[userID][messageID] = &PendingTask{
+		MessageID: messageID,
+		Text:      message.Text,
+	}
 }
 
 func (h *Handler) handleStart(message *tgbotapi.Message) error {
@@ -195,79 +142,120 @@ func (h *Handler) handleMiniAppButton(message *tgbotapi.Message) error {
 	return err
 }
 
-func (h *Handler) HandleCallback(callback *tgbotapi.CallbackQuery) error {
-	// Check if user is authorized
-	if !h.isAuthorized(callback.From.ID) {
-		log.Printf("Ignoring callback from unauthorized user: %d", callback.From.ID)
-		callbackResponse := tgbotapi.NewCallback(callback.ID, "Unauthorized")
-		_, err := h.bot.Request(callbackResponse)
-		return err
-	}
-
-	// Always answer the callback to avoid the "loading" state in Telegram
-	callbackResponse := tgbotapi.NewCallback(callback.ID, "")
-	h.bot.Request(callbackResponse)
-
-	switch callback.Data {
-	case "confirm_task":
-		return h.handleConfirmTaskCallback(callback)
-	case "cancel_task":
-		return h.handleCancelTaskCallback(callback)
-	default:
-		return h.handleDefaultCallback(callback)
-	}
+// MessageReactionUpdate represents an update to message reactions
+type MessageReactionUpdate struct {
+	Chat        ChatInfo       `json:"chat"`
+	MessageID   int            `json:"message_id"`
+	User        UserInfo       `json:"user,omitempty"`
+	ActorChat   ChatInfo       `json:"actor_chat,omitempty"`
+	Date        int            `json:"date"`
+	OldReaction []ReactionType `json:"old_reaction"`
+	NewReaction []ReactionType `json:"new_reaction"`
 }
 
-func (h *Handler) handleConfirmTaskCallback(callback *tgbotapi.CallbackQuery) error {
-	state, exists := h.userStates[callback.From.ID]
-	if !exists || state.State != StateAwaitingConfirmation {
-		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "No pending task to confirm.")
-		_, err := h.bot.Send(msg)
-		return err
+type ChatInfo struct {
+	ID int64 `json:"id"`
+}
+
+type UserInfo struct {
+	ID int64 `json:"id"`
+}
+
+type ReactionType struct {
+	Type  string `json:"type"`
+	Emoji string `json:"emoji,omitempty"`
+}
+
+// HandleMessageReaction handles reactions added to messages
+func (h *Handler) HandleMessageReaction(reaction *MessageReactionUpdate) error {
+	// Check if user is authorized
+	if reaction.User.ID == 0 || !h.isAuthorized(reaction.User.ID) {
+		log.Printf("Ignoring reaction from unauthorized or unknown user")
+		return nil
 	}
+
+	userID := reaction.User.ID
+	messageID := reaction.MessageID
+	chatID := reaction.Chat.ID
+
+	log.Printf("Received reaction update for message %d from user %d", messageID, userID)
+
+	// Check if this message has a pending task
+	if h.pendingTasks[userID] == nil || h.pendingTasks[userID][messageID] == nil {
+		log.Printf("No pending task found for message %d", messageID)
+		return nil
+	}
+
+	// Check if reaction was added (not removed)
+	if len(reaction.NewReaction) == 0 {
+		log.Printf("Reaction was removed, ignoring")
+		return nil
+	}
+
+	// Get the pending task
+	pendingTask := h.pendingTasks[userID][messageID]
 
 	// Create task in Notion
 	ctx := context.Background()
-	err := h.notion.CreateTask(ctx, state.PendingTask, nil, "tasks")
-
-	// Reset the state
-	state.State = StateNone
+	err := h.notion.CreateTask(ctx, pendingTask.Text, nil, "tasks")
 
 	if err != nil {
-		// Send error message
-		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, fmt.Sprintf("Failed to create task: %v", err))
-		_, sendErr := h.bot.Send(msg)
-		return sendErr
+		log.Printf("Failed to create task: %v", err)
+		// Optionally send error message
+		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Failed to create task: %v", err))
+		h.bot.Send(msg)
+		return err
 	}
 
-	// Update original message
-	editMsg := tgbotapi.NewEditMessageText(
-		callback.Message.Chat.ID,
-		callback.Message.MessageID,
-		fmt.Sprintf("Task created successfully! ✅\n\n\"%s\"", state.PendingTask),
-	)
-	_, err = h.bot.Send(editMsg)
-	return err
-}
+	log.Printf("Task created successfully: %s", pendingTask.Text)
 
-func (h *Handler) handleCancelTaskCallback(callback *tgbotapi.CallbackQuery) error {
-	state, exists := h.userStates[callback.From.ID]
-	if exists {
-		state.State = StateNone
+	// Remove from pending tasks
+	delete(h.pendingTasks[userID], messageID)
+
+	// Add bot's reaction to indicate task was created
+	err = h.setMessageReaction(chatID, messageID, "👍")
+	if err != nil {
+		log.Printf("Failed to add bot reaction: %v", err)
+		// This is not critical, the task was created successfully
 	}
 
-	// Update original message
-	editMsg := tgbotapi.NewEditMessageText(
-		callback.Message.Chat.ID,
-		callback.Message.MessageID,
-		"Task creation cancelled.",
-	)
-	_, err := h.bot.Send(editMsg)
-	return err
+	return nil
 }
 
-func (h *Handler) handleDefaultCallback(callback *tgbotapi.CallbackQuery) error {
-	msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Unknown action")
-	_, err := h.bot.Send(msg)
-	return err
+// setMessageReaction sets a reaction on a message using direct API call
+func (h *Handler) setMessageReaction(chatID int64, messageID int, emoji string) error {
+	token := h.bot.Token
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/setMessageReaction", token)
+
+	payload := map[string]interface{}{
+		"chat_id":    chatID,
+		"message_id": messageID,
+		"reaction": []map[string]string{
+			{
+				"type":  "emoji",
+				"emoji": emoji,
+			},
+		},
+		"is_big": false,
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var result map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&result)
+		return fmt.Errorf("API returned status %d: %v", resp.StatusCode, result)
+	}
+
+	log.Printf("Successfully set reaction on message %d", messageID)
+	return nil
 }
