@@ -12,6 +12,8 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/numero_quadro/notion-mini-app/internal/database"
+	"github.com/numero_quadro/notion-mini-app/internal/gemini"
 	"github.com/numero_quadro/notion-mini-app/internal/notion"
 )
 
@@ -24,11 +26,19 @@ type PendingTask struct {
 type Handler struct {
 	bot              *tgbotapi.BotAPI
 	notion           *notion.Client
+	gemini           *gemini.Client
+	db               *database.DB
+	scheduler        Scheduler
 	authorizedUserID int64                          // Only this user can interact with the bot
 	pendingTasks     map[int64]map[int]*PendingTask // Track pending tasks by user ID and message ID
 }
 
-func NewHandler(bot *tgbotapi.BotAPI, notionClient *notion.Client) *Handler {
+// Scheduler interface to avoid circular dependency
+type Scheduler interface {
+	RunManualCheck()
+}
+
+func NewHandler(bot *tgbotapi.BotAPI, notionClient *notion.Client, geminiClient *gemini.Client, db *database.DB) *Handler {
 	// Get authorized user ID from environment variable
 	authorizedUserIDStr := os.Getenv("AUTHORIZED_USER_ID")
 	var authorizedUserID int64 = 0
@@ -51,9 +61,17 @@ func NewHandler(bot *tgbotapi.BotAPI, notionClient *notion.Client) *Handler {
 	return &Handler{
 		bot:              bot,
 		notion:           notionClient,
+		gemini:           geminiClient,
+		db:               db,
+		scheduler:        nil, // Set later via SetScheduler
 		authorizedUserID: authorizedUserID,
 		pendingTasks:     make(map[int64]map[int]*PendingTask),
 	}
+}
+
+// SetScheduler sets the scheduler after initialization
+func (h *Handler) SetScheduler(scheduler Scheduler) {
+	h.scheduler = scheduler
 }
 
 func (h *Handler) isAuthorized(userID int64) bool {
@@ -81,6 +99,8 @@ func (h *Handler) HandleMessage(message *tgbotapi.Message) error {
 		return h.handleStart(message)
 	case "Open Mini App":
 		return h.handleMiniAppButton(message)
+	case "/cron":
+		return h.handleCronCommand(message)
 	default:
 		// Any other text is treated as a potential task, stored and waiting for reaction
 		h.storePendingTask(message)
@@ -144,6 +164,23 @@ func (h *Handler) handleMiniAppButton(message *tgbotapi.Message) error {
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, "Click the button below to open the mini app:")
 	msg.ReplyMarkup = webAppButton
+	_, err := h.bot.Send(msg)
+	return err
+}
+
+// handleCronCommand manually triggers the daily task check
+func (h *Handler) handleCronCommand(message *tgbotapi.Message) error {
+	if h.scheduler == nil {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "❌ Scheduler not available")
+		_, err := h.bot.Send(msg)
+		return err
+	}
+
+	// Trigger the check
+	h.scheduler.RunManualCheck()
+
+	// Send confirmation
+	msg := tgbotapi.NewMessage(message.Chat.ID, "✅ Task check triggered! Check logs for results.")
 	_, err := h.bot.Send(msg)
 	return err
 }
@@ -223,11 +260,12 @@ func (h *Handler) HandleMessageReaction(reaction *MessageReactionUpdate) error {
 	// Try to create task with retries
 	ctx := context.Background()
 	var err error
+	var taskID string
 	maxRetries := 3
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		log.Printf("Attempt %d/%d to create task: %s", attempt, maxRetries, pendingTask.Text)
-		err = h.notion.CreateTask(ctx, pendingTask.Text, nil, "tasks")
+		taskID, err = h.notion.CreateTask(ctx, pendingTask.Text, nil, "tasks")
 
 		if err == nil {
 			// Success!
@@ -255,6 +293,25 @@ func (h *Handler) HandleMessageReaction(reaction *MessageReactionUpdate) error {
 			log.Printf("Error setting 😢 reaction: %v", setErr)
 		}
 		return err
+	}
+
+	// Task created successfully - now tag it with Gemini and store in database
+	if h.gemini != nil && h.db != nil {
+		go func() {
+			// Get LLM tag from Gemini
+			tag, err := h.gemini.TagTask(pendingTask.Text)
+			if err != nil {
+				log.Printf("Warning: Failed to get LLM tag for task %s: %v", taskID, err)
+				tag = "task" // Default tag on error
+			}
+
+			// Store in database
+			if err := h.db.StoreTaskMetadata(taskID, pendingTask.Text, tag); err != nil {
+				log.Printf("Warning: Failed to store task metadata for %s: %v", taskID, err)
+			}
+		}()
+	} else {
+		log.Printf("Gemini or database not configured, skipping task metadata storage")
 	}
 
 	// Success - set thumbs up (try multiple times to ensure it's visible)

@@ -7,6 +7,11 @@ A Telegram bot that serves only for one user (its me hahaha) and allows to creat
 ## Features
 
 - **Reaction-based task creation**: Send message → add reaction → task created (no confirmation spam!)
+- **AI-powered task tagging**: Automatically categorizes tasks using Gemini AI (link/journal/date/task)
+- **Smart daily reminders**: Get notified at 11 PM about:
+  - Tasks with deadlines but no date set
+  - Journal entries that should be moved to journal database
+  - Link-only tasks that need proper descriptions
 - Bot confirms with ✅ reaction when task is saved
 - View and manage tasks through mini-app interface
 - Support for multiple Notion databases (tasks, notes, journal, projects)
@@ -23,14 +28,24 @@ graph TB
     Bot[Telegram Bot]
     Webhook[Webhook Endpoint]
     Notion[Notion API]
+    Gemini[Gemini AI]
     Memory[In-Memory Storage]
+    DB[SQLite Database]
+    Scheduler[Daily Scheduler]
     
     User -->|1. Sends message| Bot
     Bot -->|2. Store in pending tasks| Memory
     User -->|3. Adds reaction 👍| Webhook
     Webhook -->|4. Check pending tasks| Memory
     Webhook -->|5. Create task| Notion
-    Webhook -->|6. Add ✅ reaction| User
+    Notion -->|6. Return task ID| Webhook
+    Webhook -->|7. Tag task| Gemini
+    Gemini -->|8. Return tag| Webhook
+    Webhook -->|9. Store metadata| DB
+    Webhook -->|10. Add ✅ reaction| User
+    Scheduler -->|11 PM daily| DB
+    Scheduler -->|Check tasks| Notion
+    Scheduler -->|Send reminders| User
 ```
 
 ### Creating Tasks (Reaction-Based)
@@ -58,6 +73,25 @@ graph TB
 
 **Note**: Messages without reactions won't be added to Notion, keeping your chat clean!
 
+### AI-Powered Task Management
+
+When you create a task, the bot automatically:
+1. **Tags it with AI**: Uses Gemini to categorize as:
+   - `link` - Just a URL/link
+   - `journal` - Personal thoughts, emotions, observations
+   - `date` - Mentions a deadline or date
+   - `task` - Regular task
+
+2. **Daily Check (11 PM)**: Reviews all tasks from the past 24 hours and sends reminders:
+   - ⏰ **Date tasks without dates**: "You mentioned a deadline but didn't set a date"
+   - 📔 **Journal entries**: "This looks like a journal entry, consider moving it"
+   - 🔗 **Link-only tasks**: "Please give this link a descriptive name"
+
+**Benefits:**
+- Never forget to add dates to time-sensitive tasks
+- Keep your task database clean and organized
+- Automatic suggestions for better task management
+
 ### Managing Tasks
 
 Use the "Open Mini App" button to:
@@ -72,6 +106,7 @@ Use the "Open Mini App" button to:
 - Telegram Bot Token
 - Notion API Key
 - Notion Database IDs (tasks and/or notes)
+- Gemini API Key (for AI task tagging)
 
 ## Setup
 
@@ -85,6 +120,8 @@ Use the "Open Mini App" button to:
    MINI_APP_URL=https://your-domain.com/notion/mini-app
    AUTHORIZED_USER_ID=your_telegram_user_id
    WEBHOOK_URL=https://your-domain.com/telegram/webhook
+   GEMINI_API_KEY=your_gemini_api_key
+   DATABASE_PATH=./data/tasks.db
    ```
 3. Install dependencies:
    ```bash

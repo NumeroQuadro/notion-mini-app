@@ -8,4 +8,7 @@ require (
 	github.com/jomei/notionapi v1.12.1
 )
 
-require github.com/pkg/errors v0.9.1 // indirect
+require (
+	github.com/mattn/go-sqlite3 v1.14.32 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
+)

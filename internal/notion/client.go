@@ -114,16 +114,16 @@ func (c *Client) GetProjectsDatabaseID() string {
 	return c.projectsDbID
 }
 
-func (c *Client) CreateTask(ctx context.Context, title string, properties map[string]interface{}, dbType string) error {
+func (c *Client) CreateTask(ctx context.Context, title string, properties map[string]interface{}, dbType string) (string, error) {
 	dbID := c.getDbIDForType(dbType)
 	log.Printf("Creating task in %s database: %s with properties: %v", dbType, title, properties)
 
 	if title == "" {
-		return fmt.Errorf("task title cannot be empty")
+		return "", fmt.Errorf("task title cannot be empty")
 	}
 
 	if dbID == "" {
-		return fmt.Errorf("database ID for %s not configured", dbType)
+		return "", fmt.Errorf("database ID for %s not configured", dbType)
 	}
 
 	// Check if context has a deadline (timeout)
@@ -256,20 +256,20 @@ func (c *Client) CreateTask(ctx context.Context, title string, properties map[st
 
 		// Check for context deadline exceeded
 		if ctx.Err() == context.DeadlineExceeded {
-			return fmt.Errorf("request to Notion API timed out after %v", elapsedTime)
+			return "", fmt.Errorf("request to Notion API timed out after %v", elapsedTime)
 		}
 
 		// Check for button property error
 		if strings.Contains(err.Error(), "unsupported property type: button") {
 			log.Printf("Error due to button property - adding workaround code")
-			return fmt.Errorf("database contains button properties which are not supported by Notion API. Please remove button properties from the request")
+			return "", fmt.Errorf("database contains button properties which are not supported by Notion API. Please remove button properties from the request")
 		}
 
-		return fmt.Errorf("Notion API error: %w", err)
+		return "", fmt.Errorf("Notion API error: %w", err)
 	}
 
 	log.Printf("Task created successfully with ID: %s", createdPage.ID)
-	return nil
+	return string(createdPage.ID), nil
 }
 
 func (c *Client) getDbIDForType(dbType string) string {
@@ -443,7 +443,8 @@ func (c *Client) getPropertiesWithButtonWorkaround(ctx context.Context, dbID str
 
 // For backward compatibility
 func (c *Client) CreateItem(ctx context.Context, title string, properties map[string]interface{}) error {
-	return c.CreateTask(ctx, title, properties, "tasks")
+	_, err := c.CreateTask(ctx, title, properties, "tasks")
+	return err
 }
 
 // Helper methods for handling different property types
@@ -877,6 +878,15 @@ func (c *Client) UpdateTaskStatus(taskID string, status string, properties map[s
 
 	log.Printf("Successfully updated task %s status to %s", taskID, status)
 	return nil
+}
+
+// GetPage retrieves a single page from Notion by ID
+func (c *Client) GetPage(ctx context.Context, pageID string) (*notionapi.Page, error) {
+	page, err := c.client.Page.Get(ctx, notionapi.PageID(pageID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get page: %w", err)
+	}
+	return page, nil
 }
 
 // GetProjects retrieves projects from Notion

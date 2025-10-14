@@ -31,4 +31,9 @@ go.work
 *.swo
 
 # Binary compiled from go build
-notion-mini-app 
+notion-mini-app
+
+# Database files
+data/*.db
+data/*.db-shm
+data/*.db-wal 

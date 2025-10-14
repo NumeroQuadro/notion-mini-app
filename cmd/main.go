@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,7 +15,10 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/jomei/notionapi"
 	"github.com/numero_quadro/notion-mini-app/internal/bot"
+	"github.com/numero_quadro/notion-mini-app/internal/database"
+	"github.com/numero_quadro/notion-mini-app/internal/gemini"
 	"github.com/numero_quadro/notion-mini-app/internal/notion"
+	"github.com/numero_quadro/notion-mini-app/internal/scheduler"
 )
 
 func main() {
@@ -48,6 +52,24 @@ func main() {
 	// Initialize Notion client
 	notionClient := notion.NewClient()
 
+	// Initialize Gemini client
+	geminiClient := gemini.NewClient()
+
+	// Initialize database
+	dbPath := os.Getenv("DATABASE_PATH")
+	if dbPath == "" {
+		dbPath = "./data/tasks.db" // Default path
+	}
+	db, err := database.NewDB(dbPath)
+	if err != nil {
+		log.Printf("Warning: Failed to initialize database: %v", err)
+		log.Printf("Task tagging and notifications will be disabled")
+		db = nil
+	}
+	if db != nil {
+		defer db.Close()
+	}
+
 	// Initialize Telegram bot
 	botAPI, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
@@ -58,7 +80,31 @@ func main() {
 	log.Printf("Authorized on account %s", botAPI.Self.UserName)
 
 	// Initialize bot handler
-	handler := bot.NewHandler(botAPI, notionClient)
+	handler := bot.NewHandler(botAPI, notionClient, geminiClient, db)
+
+	// Get authorized user ID for scheduler
+	authorizedUserIDInt, err := strconv.ParseInt(authorizedUserID, 10, 64)
+	if err != nil {
+		log.Printf("Warning: Invalid authorized user ID, scheduler will be disabled")
+		authorizedUserIDInt = 0
+	}
+
+	// Start scheduler if database and user ID are configured
+	if db != nil && authorizedUserIDInt != 0 {
+		schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
+		defer schedulerCancel()
+
+		schedulerInstance := scheduler.NewScheduler(db, notionClient, botAPI, authorizedUserIDInt, "23:00")
+		globalScheduler = schedulerInstance
+
+		// Link scheduler to handler for /cron command
+		handler.SetScheduler(schedulerInstance)
+
+		go schedulerInstance.Start(schedulerCtx)
+		log.Printf("Scheduler started")
+	} else {
+		log.Printf("Scheduler disabled (database or authorized user not configured)")
+	}
 
 	// Set global variables for webhook handler
 	globalHandler = handler
@@ -144,6 +190,7 @@ func serveStaticFiles() {
 	http.HandleFunc("/notion/mini-app/api/recent-tasks", handleRecentTasks)
 	http.HandleFunc("/notion/mini-app/api/projects", handleProjects)
 	http.HandleFunc("/notion/mini-app/api/update-task-status", handleUpdateTaskStatus)
+	http.HandleFunc("/notion/mini-app/api/trigger-check", handleTriggerCheck)
 
 	// Telegram webhook endpoint for receiving reaction updates
 	http.HandleFunc("/telegram/webhook", createWebhookHandler())
@@ -342,7 +389,7 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Creating task in %s database: %s", dbType, taskReq.Title)
 
 	// Create the task in Notion
-	err := notionClient.CreateTask(ctx, taskReq.Title, taskReq.Properties, dbType)
+	taskID, err := notionClient.CreateTask(ctx, taskReq.Title, taskReq.Properties, dbType)
 	if err != nil {
 		log.Printf("Error creating task in Notion: %v", err)
 		sendJSONError(http.StatusInternalServerError, "Failed to create task: "+err.Error())
@@ -350,7 +397,7 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	elapsed := time.Since(start)
-	log.Printf("Task created successfully in %v", elapsed)
+	log.Printf("Task created successfully in %v with ID: %s", elapsed, taskID)
 
 	// Return success response
 	w.WriteHeader(http.StatusCreated)
@@ -601,7 +648,7 @@ func handleDebugTask(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	err := notionClient.CreateTask(ctx, req.Title, req.Properties, req.DbType)
+	_, err := notionClient.CreateTask(ctx, req.Title, req.Properties, req.DbType)
 	if err != nil {
 		log.Printf("Error creating debug task: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -791,9 +838,57 @@ func handleProjects(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Handler for manually triggering the daily task check
+func handleTriggerCheck(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Manual trigger check API called from: %s", r.RemoteAddr)
+
+	// Set CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Handle preflight OPTIONS request
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Set content type
+	w.Header().Set("Content-Type", "application/json")
+
+	// Only handle POST requests
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Method not allowed",
+		})
+		return
+	}
+
+	// Check if scheduler is available
+	if globalScheduler == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Scheduler not available",
+		})
+		return
+	}
+
+	// Trigger manual check
+	globalScheduler.RunManualCheck()
+
+	// Return success
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Task check triggered successfully",
+	})
+}
+
 // Global variable to store the bot handler for webhook
 var globalHandler *bot.Handler
 var globalBot *tgbotapi.BotAPI
+var globalScheduler *scheduler.Scheduler
 
 // createWebhookHandler creates a handler for Telegram webhook updates
 func createWebhookHandler() http.HandlerFunc {
