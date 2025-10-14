@@ -2,7 +2,7 @@
 
 A Telegram bot that serves only for one user (its me hahaha) and allows to create and manage tasks in Notion databases directly from Telegram.
 
-**🎯 [Quick Start Guide](QUICKSTART.md)** | **📝 [Testing Guide](TESTING.md)** | **🚀 [Deployment Guide](DEPLOYMENT.md)** | **🐳 [Docker Troubleshooting](DOCKER-TROUBLESHOOTING.md)** | **🔧 [Troubleshooting](TROUBLESHOOTING.md)** | **📋 [Changelog](CHANGELOG.md)**
+**🎯 [Quick Start](QUICKSTART.md)** | **🧪 [Testing](TESTING.md)** | **🚀 [Deployment](DEPLOYMENT.md)** | **🔧 [Troubleshooting](TROUBLESHOOTING.md)**
 
 ## Features
 

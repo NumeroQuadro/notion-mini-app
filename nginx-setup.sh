@@ -4,7 +4,7 @@
 NGINX_CONF="/etc/nginx/nginx.conf"
 BACKUP_FILE="/etc/nginx/nginx.conf.backup.$(date +%Y%m%d%H%M%S)"
 DOMAIN="tralalero-tralala.ru"
-APP_PORT="8080"
+APP_PORT="8081"  # Changed from 8080 to match Docker port mapping
 
 # Create backup
 sudo cp $NGINX_CONF $BACKUP_FILE
