@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -122,7 +123,9 @@ func (s *Scheduler) checkTaskInNotion(ctx context.Context, taskID string) (exist
 func (s *Scheduler) sendNotification(task notion.Task, hasDate bool) error {
 	var message string
 	taskPreview := truncateString(task.Title, 50)
-	taskURL := fmt.Sprintf("https://notion.so/%s", task.ID)
+	// Fix Notion URL format - remove hyphens from ID
+	cleanID := strings.ReplaceAll(task.ID, "-", "")
+	taskURL := fmt.Sprintf("https://notion.so/%s", cleanID)
 	llmTag := task.Properties["llm_tag"].(string)
 
 	switch llmTag {

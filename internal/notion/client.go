@@ -635,19 +635,29 @@ func formatDateString(date string) string {
 }
 
 // GetRecentTasks retrieves recent tasks from the specified Notion database
-// Filters for tasks that are not done
+// Filters for tasks that are not done and don't have 'sometimes-later' tag
 func (c *Client) GetRecentTasks(ctx context.Context, dbType string, limit int) ([]Task, error) {
 	dbID := c.getDbIDForType(dbType)
 	if dbID == "" {
 		return nil, fmt.Errorf("database ID for %s not configured", dbType)
 	}
 
-	// Create database query filter - only check for status not being "done"
+	// Create database query filter
 	filter := &notionapi.DatabaseQueryRequest{
-		Filter: notionapi.PropertyFilter{
-			Property: "status",
-			Select: &notionapi.SelectFilterCondition{
-				DoesNotEqual: "done",
+		Filter: notionapi.AndCompoundFilter{
+			// Filter for status not being "done"
+			notionapi.PropertyFilter{
+				Property: "status",
+				Select: &notionapi.SelectFilterCondition{
+					DoesNotEqual: "done",
+				},
+			},
+			// Filter for tags not containing "sometimes-later"
+			notionapi.PropertyFilter{
+				Property: "tags",
+				MultiSelect: &notionapi.MultiSelectFilterCondition{
+					DoesNotContain: "sometimes-later",
+				},
 			},
 		},
 		Sorts: []notionapi.SortObject{
