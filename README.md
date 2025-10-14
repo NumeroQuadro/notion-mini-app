@@ -6,14 +6,12 @@ A Telegram bot that serves only for one user (its me hahaha) and allows to creat
 
 ## Features
 
-- **Reaction-based task creation**: Send a message and react with 👍 to create a task (no confirmation dialogs!)
-- Bot confirms task creation by adding its own ✅ reaction
-- View and manage existing tasks through the mini app
-- Seamless integration with Telegram
-- Support for multiple database types (tasks and notes)
-- Graceful handling of button properties in Notion databases
-- Streamlined, simplified interface for reliable performance
-- Reduced chat spam - no "yes/no" confirmation messages
+- **Reaction-based task creation**: Send message → add reaction → task created (no confirmation spam!)
+- Bot confirms with ✅ reaction when task is saved
+- View and manage tasks through mini-app interface
+- Support for multiple Notion databases (tasks, notes, journal, projects)
+- Webhook integration for real-time reactions
+- Secure: restricted to authorized user only
 
 ## How It Works
 
@@ -29,13 +27,25 @@ graph TB
     
     User -->|1. Sends message| Bot
     Bot -->|2. Store in pending tasks| Memory
-    User -->|3. Adds reaction| Webhook
+    User -->|3. Adds reaction 👍| Webhook
     Webhook -->|4. Check pending tasks| Memory
     Webhook -->|5. Create task| Notion
     Webhook -->|6. Add ✅ reaction| User
 ```
 
-### Creating Tasks
+### Creating Tasks (Reaction-Based)
+
+1. **Send a message** to the bot (e.g., "Buy groceries")
+   - Bot silently saves it to memory (no response!)
+2. **Add any reaction** (👍, ❤️, etc.) to your message
+   - Bot receives reaction via webhook
+3. **Task created** in Notion automatically
+4. **Bot adds ✅** to confirm success
+
+**Benefits:**
+- ✅ No spam in chat (no "yes/no" confirmations)
+- ✅ Quick and natural workflow
+- ✅ Only confirmed messages become tasks
 
 1. Simply send any text message to the bot
 2. Add a reaction (any emoji) to your message
