@@ -64,32 +64,42 @@ func main() {
 	globalHandler = handler
 	globalBot = botAPI
 
-	// Serve static files for mini app
-	go serveStaticFiles()
+	// Check if we should use webhook or polling
+	webhookURL := os.Getenv("WEBHOOK_URL")
+	useWebhook := webhookURL != ""
 
-	// Use polling for development
-	updateConfig := tgbotapi.NewUpdate(0)
-	updateConfig.Timeout = 60
-	// Enable message reaction updates
-	updateConfig.AllowedUpdates = []string{"message", "callback_query", "message_reaction"}
+	if useWebhook {
+		log.Printf("Running in WEBHOOK mode: %s", webhookURL)
+		log.Printf("Bot will receive updates via webhook at /telegram/webhook")
+		log.Printf("Make sure webhook is configured with: ./setup-webhook.sh")
 
-	updates := botAPI.GetUpdatesChan(updateConfig)
+		// Serve static files and start webhook server
+		serveStaticFiles()
+	} else {
+		log.Printf("Running in POLLING mode (webhook URL not set)")
+		log.Printf("WARNING: Reactions will NOT work in polling mode!")
+		log.Printf("To enable reactions, set WEBHOOK_URL and run ./setup-webhook.sh")
 
-	// Handle updates
-	for update := range updates {
-		if update.Message != nil {
-			// Handle incoming messages
-			if err := handler.HandleMessage(update.Message); err != nil {
-				log.Printf("Error handling message: %v", err)
-			}
-		} else if update.CallbackQuery != nil {
-			// Handle callback queries (button clicks) - keeping for mini app buttons
-			log.Printf("Received callback query: %s", update.CallbackQuery.Data)
-		} else {
-			// Try to parse message_reaction update manually
-			// The library doesn't support it directly, so we need to check RawData
-			if err := handleMessageReactionFromUpdate(update, handler); err != nil {
-				log.Printf("Error handling reaction: %v", err)
+		// Serve static files for mini app in background
+		go serveStaticFiles()
+
+		// Use polling for development
+		updateConfig := tgbotapi.NewUpdate(0)
+		updateConfig.Timeout = 60
+		updateConfig.AllowedUpdates = []string{"message", "callback_query"}
+
+		updates := botAPI.GetUpdatesChan(updateConfig)
+
+		// Handle updates
+		for update := range updates {
+			if update.Message != nil {
+				// Handle incoming messages
+				if err := handler.HandleMessage(update.Message); err != nil {
+					log.Printf("Error handling message: %v", err)
+				}
+			} else if update.CallbackQuery != nil {
+				// Handle callback queries (button clicks)
+				log.Printf("Received callback query: %s", update.CallbackQuery.Data)
 			}
 		}
 	}
@@ -803,7 +813,28 @@ func createWebhookHandler() http.HandlerFunc {
 
 		log.Printf("Received webhook update: %+v", updateData)
 
-		// Check if this is a message_reaction update
+		// Handle different update types
+
+		// 1. Handle regular messages
+		if messageData, ok := updateData["message"]; ok {
+			log.Printf("Received message update via webhook")
+
+			// Parse the message
+			messageJSON, _ := json.Marshal(messageData)
+			var message tgbotapi.Message
+			if err := json.Unmarshal(messageJSON, &message); err == nil && globalHandler != nil {
+				if err := globalHandler.HandleMessage(&message); err != nil {
+					log.Printf("Error handling message: %v", err)
+				}
+			}
+		}
+
+		// 2. Handle callback queries
+		if callbackData, ok := updateData["callback_query"]; ok {
+			log.Printf("Received callback query via webhook: %+v", callbackData)
+		}
+
+		// 3. Handle message reactions
 		if messageReactionData, ok := updateData["message_reaction"]; ok {
 			log.Printf("Received message_reaction update: %+v", messageReactionData)
 
