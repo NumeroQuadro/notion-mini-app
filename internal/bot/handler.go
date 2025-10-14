@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/numero_quadro/notion-mini-app/internal/notion"
@@ -195,30 +196,46 @@ func (h *Handler) HandleMessageReaction(reaction *MessageReactionUpdate) error {
 	// Get the pending task
 	pendingTask := h.pendingTasks[userID][messageID]
 
-	// Create task in Notion
+	// Set writing hand reaction to indicate processing
+	h.setMessageReaction(chatID, messageID, "✍️")
+
+	// Try to create task with retries
 	ctx := context.Background()
-	err := h.notion.CreateTask(ctx, pendingTask.Text, nil, "tasks")
+	var err error
+	maxRetries := 3
 
-	if err != nil {
-		log.Printf("Failed to create task: %v", err)
-		// Optionally send error message
-		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Failed to create task: %v", err))
-		h.bot.Send(msg)
-		return err
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		log.Printf("Attempt %d/%d to create task: %s", attempt, maxRetries, pendingTask.Text)
+		err = h.notion.CreateTask(ctx, pendingTask.Text, nil, "tasks")
+
+		if err == nil {
+			// Success!
+			log.Printf("Task created successfully on attempt %d: %s", attempt, pendingTask.Text)
+			break
+		}
+
+		log.Printf("Attempt %d failed: %v", attempt, err)
+
+		if attempt < maxRetries {
+			// Wait before retry (exponential backoff)
+			sleep := time.Duration(attempt) * 2 * time.Second
+			log.Printf("Waiting %v before retry...", sleep)
+			time.Sleep(sleep)
+		}
 	}
-
-	log.Printf("Task created successfully: %s", pendingTask.Text)
 
 	// Remove from pending tasks
 	delete(h.pendingTasks[userID], messageID)
 
-	// Add bot's reaction to indicate task was created
-	err = h.setMessageReaction(chatID, messageID, "👍")
 	if err != nil {
-		log.Printf("Failed to add bot reaction: %v", err)
-		// This is not critical, the task was created successfully
+		// All retries failed - set crying emoji
+		log.Printf("Failed to create task after %d attempts: %v", maxRetries, err)
+		h.setMessageReaction(chatID, messageID, "😢")
+		return err
 	}
 
+	// Success - set checkmark
+	h.setMessageReaction(chatID, messageID, "✅")
 	return nil
 }
 
