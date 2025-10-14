@@ -34,7 +34,7 @@ func main() {
 	if authorizedUserID == "" {
 		log.Printf("Warning: AUTHORIZED_USER_ID not set, bot will be accessible to anyone")
 	} else {
-		log.Printf("Bot will be restricted to user ID: %s", authorizedUserID)
+		log.Printf("Bot will be allowed only to user with IDs: %s", authorizedUserID)
 	}
 
 	// Get mini app URL
