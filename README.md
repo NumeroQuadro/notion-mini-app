@@ -37,15 +37,19 @@ graph TB
 
 1. **Send a message** to the bot (e.g., "Buy groceries")
    - Bot silently saves it to memory (no response!)
-2. **Add any reaction** (👍, ❤️, etc.) to your message
-   - Bot receives reaction via webhook
-3. **Task created** in Notion automatically
-4. **Bot adds ✅** to confirm success
+   - You can **edit the message** anytime before adding reaction
+2. **Add 👍 reaction** to your message when ready
+   - Bot shows ✍️ (processing)
+   - Retries up to 3 times if needed
+3. **Result:**
+   - ✅ = Task created successfully
+   - 😢 = Failed after 3 attempts
 
 **Benefits:**
 - ✅ No spam in chat (no "yes/no" confirmations)
-- ✅ Quick and natural workflow
-- ✅ Only confirmed messages become tasks
+- ✅ Edit messages before confirming
+- ✅ Only 👍 triggers processing (other reactions ignored)
+- ✅ Automatic retries on errors
 
 1. Simply send any text message to the bot
 2. Add a reaction (any emoji) to your message

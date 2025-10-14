@@ -193,11 +193,27 @@ func (h *Handler) HandleMessageReaction(reaction *MessageReactionUpdate) error {
 		return nil
 	}
 
+	// Only process if reaction is 👍 (thumbs up)
+	isThumbsUp := false
+	for _, r := range reaction.NewReaction {
+		if r.Type == "emoji" && r.Emoji == "👍" {
+			isThumbsUp = true
+			break
+		}
+	}
+
+	if !isThumbsUp {
+		log.Printf("Reaction is not thumbs up, ignoring")
+		return nil
+	}
+
 	// Get the pending task
 	pendingTask := h.pendingTasks[userID][messageID]
 
 	// Set writing hand reaction to indicate processing
-	h.setMessageReaction(chatID, messageID, "✍️")
+	if setErr := h.setMessageReaction(chatID, messageID, "✍️"); setErr != nil {
+		log.Printf("Warning: Failed to set ✍️ reaction: %v", setErr)
+	}
 
 	// Try to create task with retries
 	ctx := context.Background()
@@ -230,12 +246,22 @@ func (h *Handler) HandleMessageReaction(reaction *MessageReactionUpdate) error {
 	if err != nil {
 		// All retries failed - set crying emoji
 		log.Printf("Failed to create task after %d attempts: %v", maxRetries, err)
-		h.setMessageReaction(chatID, messageID, "😢")
+		if setErr := h.setMessageReaction(chatID, messageID, "😢"); setErr != nil {
+			log.Printf("Error setting 😢 reaction: %v", setErr)
+		}
 		return err
 	}
 
-	// Success - set checkmark
-	h.setMessageReaction(chatID, messageID, "✅")
+	// Success - set checkmark (try multiple times to ensure it's visible)
+	for i := 0; i < 2; i++ {
+		if setErr := h.setMessageReaction(chatID, messageID, "✅"); setErr != nil {
+			log.Printf("Attempt %d: Failed to set ✅ reaction: %v", i+1, setErr)
+			time.Sleep(500 * time.Millisecond)
+		} else {
+			log.Printf("Successfully set ✅ reaction")
+			break
+		}
+	}
 	return nil
 }
 

@@ -829,6 +829,21 @@ func createWebhookHandler() http.HandlerFunc {
 			}
 		}
 
+		// 1.5. Handle edited messages (update pending task)
+		if editedMessageData, ok := updateData["edited_message"]; ok {
+			log.Printf("Received edited message update via webhook")
+
+			// Parse the edited message
+			messageJSON, _ := json.Marshal(editedMessageData)
+			var message tgbotapi.Message
+			if err := json.Unmarshal(messageJSON, &message); err == nil && globalHandler != nil {
+				// Update the pending task with new text
+				if err := globalHandler.HandleMessage(&message); err != nil {
+					log.Printf("Error handling edited message: %v", err)
+				}
+			}
+		}
+
 		// 2. Handle callback queries
 		if callbackData, ok := updateData["callback_query"]; ok {
 			log.Printf("Received callback query via webhook: %+v", callbackData)
