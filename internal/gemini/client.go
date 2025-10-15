@@ -1,19 +1,21 @@
 package gemini
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"log"
-	"net/http"
-	"os"
-	"strings"
+    "bytes"
+    "encoding/base64"
+    "encoding/json"
+    "fmt"
+    "io"
+    "log"
+    "net/http"
+    "os"
+    "strings"
 )
 
 type Client struct {
-	apiKey string
-	model  string
+    apiKey string
+    model  string
+    audioModel string
 }
 
 type GeminiRequest struct {
@@ -25,7 +27,8 @@ type Content struct {
 }
 
 type Part struct {
-	Text string `json:"text"`
+    Text       string      `json:"text,omitempty"`
+    InlineData *InlineData `json:"inlineData,omitempty"`
 }
 
 type GeminiResponse struct {
@@ -41,7 +44,13 @@ type ContentResponse struct {
 }
 
 type PartResponse struct {
-	Text string `json:"text"`
+    Text string `json:"text"`
+}
+
+// InlineData represents binary data embedded directly in the request
+type InlineData struct {
+    MimeType string `json:"mimeType"`
+    Data     string `json:"data"`
 }
 
 // NewClient creates a new Gemini API client
@@ -51,10 +60,11 @@ func NewClient() *Client {
 		log.Printf("WARNING: GEMINI_API_KEY not set")
 	}
 
-	return &Client{
-		apiKey: apiKey,
-		model:  "gemini-2.0-flash-lite", // Using lite model for better rate limits
-	}
+    return &Client{
+        apiKey:    apiKey,
+        model:     "gemini-2.0-flash-lite", // Text-only tagging
+        audioModel: "gemini-1.5-flash",      // Multimodal model for audio transcription
+    }
 }
 
 // TagTask analyzes the task content and returns an appropriate tag
@@ -134,4 +144,58 @@ Respond with ONLY ONE WORD from: link, journal, date, or task`, taskContent)
 
 	log.Printf("Gemini tagged task as: %s", tag)
 	return tag, nil
+}
+
+// TranscribeAudio sends audio bytes to Gemini and returns the transcription text
+func (c *Client) TranscribeAudio(audio []byte, mimeType string) (string, error) {
+    if c.apiKey == "" {
+        return "", fmt.Errorf("GEMINI_API_KEY not configured")
+    }
+    if len(audio) == 0 {
+        return "", fmt.Errorf("empty audio payload")
+    }
+    if mimeType == "" {
+        // Default to ogg/opus which Telegram voice notes typically use
+        mimeType = "audio/ogg"
+    }
+
+    reqBody := GeminiRequest{
+        Contents: []Content{
+            {
+                Parts: []Part{
+                    {Text: "Transcribe this audio to plain text. Respond with only the transcription."},
+                    {InlineData: &InlineData{MimeType: mimeType, Data: base64.StdEncoding.EncodeToString(audio)}},
+                },
+            },
+        },
+    }
+
+    jsonData, err := json.Marshal(reqBody)
+    if err != nil {
+        return "", fmt.Errorf("failed to marshal request: %w", err)
+    }
+
+    url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", c.audioModel, c.apiKey)
+    resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+    if err != nil {
+        return "", fmt.Errorf("failed to call Gemini API: %w", err)
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != http.StatusOK {
+        body, _ := io.ReadAll(resp.Body)
+        return "", fmt.Errorf("Gemini API returned status %d: %s", resp.StatusCode, string(body))
+    }
+
+    var geminiResp GeminiResponse
+    if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil {
+        return "", fmt.Errorf("failed to decode response: %w", err)
+    }
+    if len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
+        return "", fmt.Errorf("empty response from Gemini API")
+    }
+
+    text := strings.TrimSpace(geminiResp.Candidates[0].Content.Parts[0].Text)
+    log.Printf("Gemini transcription length: %d chars", len(text))
+    return text, nil
 }

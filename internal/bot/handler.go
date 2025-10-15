@@ -1,19 +1,20 @@
 package bot
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"fmt"
-	"log"
-	"net/http"
-	"os"
-	"strconv"
-	"time"
+    "bytes"
+    "context"
+    "encoding/json"
+    "fmt"
+    "io"
+    "log"
+    "net/http"
+    "os"
+    "strconv"
+    "time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/numero_quadro/notion-mini-app/internal/gemini"
-	"github.com/numero_quadro/notion-mini-app/internal/notion"
+    tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+    "github.com/numero_quadro/notion-mini-app/internal/gemini"
+    "github.com/numero_quadro/notion-mini-app/internal/notion"
 )
 
 // Store pending tasks waiting for reaction
@@ -80,21 +81,88 @@ func (h *Handler) isAuthorized(userID int64) bool {
 }
 
 func (h *Handler) HandleMessage(message *tgbotapi.Message) error {
-	// Check if user is authorized
-	if !h.isAuthorized(message.From.ID) {
-		// Only respond to /start, silently ignore other messages from unauthorized users
-		if message.Text == "/start" {
-			return h.handleUnauthorized(message)
-		}
-		log.Printf("Ignoring message from unauthorized user: %d", message.From.ID)
-		return nil
-	}
+    // Check if user is authorized
+    if !h.isAuthorized(message.From.ID) {
+        // Only respond to /start, silently ignore other messages from unauthorized users
+        if message.Text == "/start" {
+            return h.handleUnauthorized(message)
+        }
+        log.Printf("Ignoring message from unauthorized user: %d", message.From.ID)
+        return nil
+    }
 
-	// Handle regular commands
-	switch message.Text {
-	case "/start":
-		return h.handleStart(message)
-	case "Open Mini App":
+    // If it's a voice or audio message, transcribe it first
+    if (message.Voice != nil || message.Audio != nil) && h.gemini != nil {
+        var fileID string
+        var mimeType string
+        if message.Voice != nil {
+            fileID = message.Voice.FileID
+            mimeType = message.Voice.MimeType
+            if mimeType == "" {
+                mimeType = "audio/ogg"
+            }
+        } else if message.Audio != nil {
+            fileID = message.Audio.FileID
+            mimeType = message.Audio.MimeType
+            if mimeType == "" {
+                mimeType = "audio/mpeg"
+            }
+        }
+
+        // Download file from Telegram
+        url, err := h.bot.GetFileDirectURL(fileID)
+        if err != nil {
+            log.Printf("Failed to get file URL: %v", err)
+            // Gracefully continue without storing
+            msg := tgbotapi.NewMessage(message.Chat.ID, "❌ Could not access audio file.")
+            _, _ = h.bot.Send(msg)
+            return nil
+        }
+        resp, err := http.Get(url)
+        if err != nil {
+            log.Printf("Failed to download audio: %v", err)
+            msg := tgbotapi.NewMessage(message.Chat.ID, "❌ Download failed for audio.")
+            _, _ = h.bot.Send(msg)
+            return nil
+        }
+        defer resp.Body.Close()
+        audioBytes, err := io.ReadAll(resp.Body)
+        if err != nil {
+            log.Printf("Failed to read audio bytes: %v", err)
+            msg := tgbotapi.NewMessage(message.Chat.ID, "❌ Could not read audio data.")
+            _, _ = h.bot.Send(msg)
+            return nil
+        }
+
+        // Transcribe via Gemini
+        transcript, err := h.gemini.TranscribeAudio(audioBytes, mimeType)
+        if err != nil {
+            log.Printf("Gemini transcription failed: %v", err)
+            msg := tgbotapi.NewMessage(message.Chat.ID, "❌ Transcription failed.")
+            _, _ = h.bot.Send(msg)
+            return nil
+        }
+
+        // Store as pending task with the transcribed text
+        message.Text = transcript
+        h.storePendingTask(message)
+
+        // Brief confirmation
+        preview := transcript
+        if len([]rune(preview)) > 200 {
+            previewRunes := []rune(preview)
+            preview = string(previewRunes[:200]) + "..."
+        }
+        confirm := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("📝 Transcribed. Add 👍 to save.\n%s", preview))
+        _, _ = h.bot.Send(confirm)
+        return nil
+    }
+
+    // Handle regular commands
+    switch message.Text {
+    case "/start":
+        return h.handleStart(message)
+    case "Open Mini App":
 		return h.handleMiniAppButton(message)
 	case "/cron":
 		return h.handleCronCommand(message)

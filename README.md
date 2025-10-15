@@ -8,6 +8,7 @@ A Telegram bot that serves only for one user (its me hahaha) and allows to creat
 
 - **Reaction-based task creation**: Send message → add reaction → task created (no confirmation spam!)
 - **AI-powered task tagging**: Automatically categorizes tasks using Gemini AI (link/journal/date/task)
+- **Voice-to-text via Gemini**: Send a voice note or audio and it’s transcribed; add 👍 to save as a task
 - **Smart daily reminders**: Get notified at 11 PM about:
   - Tasks with deadlines but no date set
   - Journal entries that should be moved to journal database
@@ -109,6 +110,7 @@ Use the "Open Mini App" button to:
 - Notion API Key
 - Notion Database IDs (tasks and/or notes)
 - Gemini API Key (for AI task tagging)
+  - Also used for voice transcription (Gemini 1.5 Flash)
 
 ## Setup
 
@@ -133,6 +135,7 @@ Use the "Open Mini App" button to:
    ```bash
    go run cmd/main.go
    ```
+   - Voice notes: simply send a voice or audio message; the bot will transcribe it, react with 🤔, and wait for your 👍 to save it to Notion.
 5. **Setup Telegram Webhook** (required for reactions to work):
    
    **Easy way** (using the provided script):
