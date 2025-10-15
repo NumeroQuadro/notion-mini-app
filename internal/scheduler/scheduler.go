@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ type Scheduler struct {
 	bot              *tgbotapi.BotAPI
 	authorizedUserID int64
 	checkTime        string // Format: "15:04" (HH:MM in 24-hour format)
+	timezone         *time.Location
 }
 
 // NewScheduler creates a new scheduler instance
@@ -25,17 +27,32 @@ func NewScheduler(notionClient *notion.Client, bot *tgbotapi.BotAPI, authorizedU
 		checkTime = "23:00" // Default to 11 PM
 	}
 
+	// Load timezone from environment variable or default to MSK
+	tzName := os.Getenv("TZ")
+	if tzName == "" {
+		tzName = "Europe/Moscow" // Default to Moscow timezone
+	}
+
+	location, err := time.LoadLocation(tzName)
+	if err != nil {
+		log.Printf("Warning: Failed to load timezone '%s': %v. Using UTC.", tzName, err)
+		location = time.UTC
+	} else {
+		log.Printf("Scheduler timezone set to: %s", tzName)
+	}
+
 	return &Scheduler{
 		notionClient:     notionClient,
 		bot:              bot,
 		authorizedUserID: authorizedUserID,
 		checkTime:        checkTime,
+		timezone:         location,
 	}
 }
 
 // Start begins the scheduler loop
 func (s *Scheduler) Start(ctx context.Context) {
-	log.Printf("Starting scheduler with daily check at %s", s.checkTime)
+	log.Printf("Starting scheduler with daily check at %s (timezone: %s)", s.checkTime, s.timezone.String())
 
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
@@ -46,9 +63,13 @@ func (s *Scheduler) Start(ctx context.Context) {
 			log.Printf("Scheduler stopped")
 			return
 		case now := <-ticker.C:
+			// Convert current time to configured timezone
+			localNow := now.In(s.timezone)
+			currentTime := localNow.Format("15:04")
+
 			// Check if current time matches check time
-			if now.Format("15:04") == s.checkTime {
-				log.Printf("Running scheduled task check at %s", now.Format("15:04"))
+			if currentTime == s.checkTime {
+				log.Printf("Running scheduled task check at %s %s", currentTime, s.timezone.String())
 				go s.checkTasks(ctx)
 			}
 		}

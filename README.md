@@ -95,6 +95,8 @@ When you create a task, the bot automatically:
    - 📔 **Journal entries**: "This looks like a journal entry, consider moving it"
    - 🔗 **Link-only tasks**: "Please give this link a descriptive name"
    - Manually trigger with `/cron` command
+   - **Timezone**: Set via `TZ` environment variable (default: `Europe/Moscow`)
+   - **Time**: 23:00 in configured timezone (11 PM MSK by default)
 
 **Benefits:**
 - Never forget to add dates to time-sensitive tasks (especially university work)
@@ -152,6 +154,9 @@ Available commands you can send to the bot:
    # GEMINI_AUDIO_MODEL=gemini-2.0-flash
    # GEMINI_API_VERSION=v1beta
    DATABASE_PATH=./data/tasks.db
+   
+   # Scheduler configuration (optional)
+   TZ=Europe/Moscow  # Timezone for daily checks (default: Europe/Moscow)
    ```
 3. Install dependencies:
    ```bash
