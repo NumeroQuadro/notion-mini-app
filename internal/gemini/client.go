@@ -16,6 +16,7 @@ type Client struct {
     apiKey string
     model  string
     audioModel string
+    apiVersion string
 }
 
 type GeminiRequest struct {
@@ -55,15 +56,28 @@ type InlineData struct {
 
 // NewClient creates a new Gemini API client
 func NewClient() *Client {
-	apiKey := os.Getenv("GEMINI_API_KEY")
-	if apiKey == "" {
-		log.Printf("WARNING: GEMINI_API_KEY not set")
-	}
+    apiKey := os.Getenv("GEMINI_API_KEY")
+    if apiKey == "" {
+        log.Printf("WARNING: GEMINI_API_KEY not set")
+    }
+
+    // Allow override via env
+    audioModel := os.Getenv("GEMINI_AUDIO_MODEL")
+    if audioModel == "" {
+        // Default to a widely available multimodal model for STT
+        audioModel = "gemini-2.5-flash"
+    }
+
+    apiVersion := os.Getenv("GEMINI_API_VERSION")
+    if apiVersion == "" {
+        apiVersion = "v1beta"
+    }
 
     return &Client{
-        apiKey:    apiKey,
-        model:     "gemini-2.0-flash-lite", // Text-only tagging
-        audioModel: "gemini-1.5-flash",      // Multimodal model for audio transcription
+        apiKey:     apiKey,
+        model:      "gemini-2.0-flash-lite", // Text-only tagging
+        audioModel: audioModel,               // Multimodal model for audio transcription
+        apiVersion: apiVersion,
     }
 }
 
@@ -175,27 +189,66 @@ func (c *Client) TranscribeAudio(audio []byte, mimeType string) (string, error) 
         return "", fmt.Errorf("failed to marshal request: %w", err)
     }
 
-    url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", c.audioModel, c.apiKey)
-    resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
-    if err != nil {
-        return "", fmt.Errorf("failed to call Gemini API: %w", err)
+    // Try model and API version fallbacks for compatibility
+    modelCandidates := []string{}
+    if m := os.Getenv("GEMINI_AUDIO_MODEL"); m != "" {
+        modelCandidates = append(modelCandidates, m)
     }
-    defer resp.Body.Close()
+    // Default order of widely available multimodal models
+    modelCandidates = append(modelCandidates,
+        c.audioModel,
+        "gemini-1.5-pro",
+        "gemini-1.5-flash-8b",
+        "gemini-1.5-flash",
+    )
 
-    if resp.StatusCode != http.StatusOK {
-        body, _ := io.ReadAll(resp.Body)
-        return "", fmt.Errorf("Gemini API returned status %d: %s", resp.StatusCode, string(body))
+    versionCandidates := []string{}
+    if c.apiVersion != "" {
+        versionCandidates = append(versionCandidates, c.apiVersion)
+    }
+    // Also try stable v1 as a fallback
+    if c.apiVersion != "v1" {
+        versionCandidates = append(versionCandidates, "v1")
     }
 
-    var geminiResp GeminiResponse
-    if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil {
-        return "", fmt.Errorf("failed to decode response: %w", err)
-    }
-    if len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
-        return "", fmt.Errorf("empty response from Gemini API")
-    }
+    var lastErr error
+    for _, model := range modelCandidates {
+        for _, ver := range versionCandidates {
+            url := fmt.Sprintf("https://generativelanguage.googleapis.com/%s/models/%s:generateContent?key=%s", ver, model, c.apiKey)
+            log.Printf("Gemini transcription using model=%s api=%s", model, ver)
+            resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+            if err != nil {
+                lastErr = fmt.Errorf("failed request for %s/%s: %w", ver, model, err)
+                continue
+            }
+            bodyBytes, _ := io.ReadAll(resp.Body)
+            resp.Body.Close()
 
-    text := strings.TrimSpace(geminiResp.Candidates[0].Content.Parts[0].Text)
-    log.Printf("Gemini transcription length: %d chars", len(text))
-    return text, nil
+            if resp.StatusCode == http.StatusOK {
+                var geminiResp GeminiResponse
+                if err := json.Unmarshal(bodyBytes, &geminiResp); err != nil {
+                    return "", fmt.Errorf("failed to decode response: %w", err)
+                }
+                if len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
+                    return "", fmt.Errorf("empty response from Gemini API")
+                }
+                text := strings.TrimSpace(geminiResp.Candidates[0].Content.Parts[0].Text)
+                log.Printf("Gemini transcription length: %d chars (model=%s)", len(text), model)
+                return text, nil
+            }
+
+            // If not OK, decide whether to try next or fail
+            if resp.StatusCode == http.StatusNotFound {
+                // Model not found for this version; try next combination
+                lastErr = fmt.Errorf("404 for %s/%s: %s", ver, model, string(bodyBytes))
+                continue
+            }
+            // For other errors, return immediately to surface real issues (quota, auth, etc.)
+            return "", fmt.Errorf("Gemini API returned status %d for %s/%s: %s", resp.StatusCode, ver, model, string(bodyBytes))
+        }
+    }
+    if lastErr != nil {
+        return "", lastErr
+    }
+    return "", fmt.Errorf("no available Gemini model for audio transcription")
 }

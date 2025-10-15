@@ -111,6 +111,8 @@ Use the "Open Mini App" button to:
 - Notion Database IDs (tasks and/or notes)
 - Gemini API Key (for AI task tagging)
   - Also used for voice transcription (Gemini 1.5 Flash)
+  - Optional: set `GEMINI_AUDIO_MODEL` to override the transcription model (default: `gemini-2.0-flash`).
+  - Optional: set `GEMINI_API_VERSION` to override API version for Gemini calls (default: `v1beta`).
 
 ## Setup
 
@@ -125,6 +127,9 @@ Use the "Open Mini App" button to:
    AUTHORIZED_USER_ID=your_telegram_user_id
    WEBHOOK_URL=https://your-domain.com/telegram/webhook
    GEMINI_API_KEY=your_gemini_api_key
+   # Optional overrides for Gemini audio transcription
+   # GEMINI_AUDIO_MODEL=gemini-2.0-flash
+   # GEMINI_API_VERSION=v1beta
    DATABASE_PATH=./data/tasks.db
    ```
 3. Install dependencies:
