@@ -87,15 +87,27 @@ func (s *Scheduler) RunManualCheck() {
 func (s *Scheduler) checkTasks(ctx context.Context) {
 	log.Printf("Starting task check...")
 
+	// Send header message to separate this batch from previous ones
+	checkTime := time.Now().In(s.timezone)
+	headerMsg := tgbotapi.NewMessage(s.authorizedUserID, 
+		fmt.Sprintf("━━━━━━━━━━━━━━━━━━━━\n📋 **Daily Task Check**\n🕐 %s\n━━━━━━━━━━━━━━━━━━━━", 
+			checkTime.Format("Mon, 02 Jan 2006 15:04 MST")))
+	headerMsg.ParseMode = "Markdown"
+	s.bot.Send(headerMsg)
+
 	// Query ALL non-done tasks from Notion (not just last 24h from local DB)
 	tasks, err := s.notionClient.GetRecentTasks(ctx, "tasks", 1000) // Get up to 1000 tasks
 	if err != nil {
 		log.Printf("Error retrieving tasks from Notion: %v", err)
+		errorMsg := tgbotapi.NewMessage(s.authorizedUserID, 
+			fmt.Sprintf("❌ Error checking tasks: %v", err))
+		s.bot.Send(errorMsg)
 		return
 	}
 
 	log.Printf("Found %d non-done tasks to check", len(tasks))
 
+	notificationCount := 0
 	for _, task := range tasks {
 		// Check if task has llm_tag property in Notion
 		llmTag, hasTag := task.Properties["llm_tag"].(string)
@@ -115,10 +127,26 @@ func (s *Scheduler) checkTasks(ctx context.Context) {
 		// Send notifications based on tag
 		if err := s.sendNotification(task, hasDate); err != nil {
 			log.Printf("Error sending notification for task %s: %v", task.ID, err)
+		} else {
+			// Only count if notification was actually sent
+			if (llmTag == "date" && !hasDate) || llmTag == "journal" || llmTag == "link" {
+				notificationCount++
+			}
 		}
 	}
 
-	log.Printf("Task check completed")
+	// Send footer message with summary
+	var footerText string
+	if notificationCount == 0 {
+		footerText = "✅ All tasks look good! No issues found."
+	} else {
+		footerText = fmt.Sprintf("📊 Found %d task(s) needing attention", notificationCount)
+	}
+	footerMsg := tgbotapi.NewMessage(s.authorizedUserID, 
+		fmt.Sprintf("━━━━━━━━━━━━━━━━━━━━\n%s\n━━━━━━━━━━━━━━━━━━━━", footerText))
+	s.bot.Send(footerMsg)
+
+	log.Printf("Task check completed: %d notifications sent", notificationCount)
 }
 
 // checkTaskInNotion verifies if a task exists in Notion and checks if it has a date
