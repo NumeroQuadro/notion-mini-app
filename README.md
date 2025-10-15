@@ -84,10 +84,17 @@ When you create a task, the bot automatically:
    - `task` - Regular task
    - **Tag is stored in Notion's `llm_tag` property**
 
-2. **Daily Check (11 PM)**: Reviews ALL non-done tasks (without `sometimes-later` tag) and sends reminders:
+2. **Manual Tagging** - Use `/tags` command:
+   - Forces AI to tag ALL existing tasks in your database
+   - Skips tasks that already have tags
+   - Processes up to 1000 tasks
+   - Shows progress summary when complete
+
+3. **Daily Check (11 PM)**: Reviews ALL non-done tasks (without `sometimes-later` tag) and sends reminders:
    - ⏰ **Date tasks without dates**: "You mentioned a deadline but didn't set a date"
    - 📔 **Journal entries**: "This looks like a journal entry, consider moving it"
    - 🔗 **Link-only tasks**: "Please give this link a descriptive name"
+   - Manually trigger with `/cron` command
 
 **Benefits:**
 - Never forget to add dates to time-sensitive tasks (especially university work)
@@ -102,6 +109,20 @@ Use the "Open Mini App" button to:
 - Update task properties
 - Mark tasks as complete
 - Access different databases (tasks/notes)
+
+## Bot Commands
+
+Available commands you can send to the bot:
+
+- `/start` - Initialize the bot and show the main menu
+- `/tags` - Force AI to tag all existing tasks (processes up to 1000 tasks, skips already tagged)
+- `/cron` - Manually trigger the daily task check (normally runs at 11 PM)
+
+**Command Usage:**
+```
+/tags    # Tag all untagged tasks with AI
+/cron    # Check all tasks and send reminders now
+```
 
 ## Prerequisites
 

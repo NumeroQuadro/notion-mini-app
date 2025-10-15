@@ -1,20 +1,20 @@
 package bot
 
 import (
-    "bytes"
-    "context"
-    "encoding/json"
-    "fmt"
-    "io"
-    "log"
-    "net/http"
-    "os"
-    "strconv"
-    "time"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"strconv"
+	"time"
 
-    tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-    "github.com/numero_quadro/notion-mini-app/internal/gemini"
-    "github.com/numero_quadro/notion-mini-app/internal/notion"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/numero_quadro/notion-mini-app/internal/gemini"
+	"github.com/numero_quadro/notion-mini-app/internal/notion"
 )
 
 // Store pending tasks waiting for reaction
@@ -81,91 +81,93 @@ func (h *Handler) isAuthorized(userID int64) bool {
 }
 
 func (h *Handler) HandleMessage(message *tgbotapi.Message) error {
-    // Check if user is authorized
-    if !h.isAuthorized(message.From.ID) {
-        // Only respond to /start, silently ignore other messages from unauthorized users
-        if message.Text == "/start" {
-            return h.handleUnauthorized(message)
-        }
-        log.Printf("Ignoring message from unauthorized user: %d", message.From.ID)
-        return nil
-    }
+	// Check if user is authorized
+	if !h.isAuthorized(message.From.ID) {
+		// Only respond to /start, silently ignore other messages from unauthorized users
+		if message.Text == "/start" {
+			return h.handleUnauthorized(message)
+		}
+		log.Printf("Ignoring message from unauthorized user: %d", message.From.ID)
+		return nil
+	}
 
-    // If it's a voice or audio message, transcribe it first
-    if (message.Voice != nil || message.Audio != nil) && h.gemini != nil {
-        var fileID string
-        var mimeType string
-        if message.Voice != nil {
-            fileID = message.Voice.FileID
-            mimeType = message.Voice.MimeType
-            if mimeType == "" {
-                mimeType = "audio/ogg"
-            }
-        } else if message.Audio != nil {
-            fileID = message.Audio.FileID
-            mimeType = message.Audio.MimeType
-            if mimeType == "" {
-                mimeType = "audio/mpeg"
-            }
-        }
+	// If it's a voice or audio message, transcribe it first
+	if (message.Voice != nil || message.Audio != nil) && h.gemini != nil {
+		var fileID string
+		var mimeType string
+		if message.Voice != nil {
+			fileID = message.Voice.FileID
+			mimeType = message.Voice.MimeType
+			if mimeType == "" {
+				mimeType = "audio/ogg"
+			}
+		} else if message.Audio != nil {
+			fileID = message.Audio.FileID
+			mimeType = message.Audio.MimeType
+			if mimeType == "" {
+				mimeType = "audio/mpeg"
+			}
+		}
 
-        // Download file from Telegram
-        url, err := h.bot.GetFileDirectURL(fileID)
-        if err != nil {
-            log.Printf("Failed to get file URL: %v", err)
-            // Gracefully continue without storing
-            msg := tgbotapi.NewMessage(message.Chat.ID, "❌ Could not access audio file.")
-            _, _ = h.bot.Send(msg)
-            return nil
-        }
-        resp, err := http.Get(url)
-        if err != nil {
-            log.Printf("Failed to download audio: %v", err)
-            msg := tgbotapi.NewMessage(message.Chat.ID, "❌ Download failed for audio.")
-            _, _ = h.bot.Send(msg)
-            return nil
-        }
-        defer resp.Body.Close()
-        audioBytes, err := io.ReadAll(resp.Body)
-        if err != nil {
-            log.Printf("Failed to read audio bytes: %v", err)
-            msg := tgbotapi.NewMessage(message.Chat.ID, "❌ Could not read audio data.")
-            _, _ = h.bot.Send(msg)
-            return nil
-        }
+		// Download file from Telegram
+		url, err := h.bot.GetFileDirectURL(fileID)
+		if err != nil {
+			log.Printf("Failed to get file URL: %v", err)
+			// Gracefully continue without storing
+			msg := tgbotapi.NewMessage(message.Chat.ID, "❌ Could not access audio file.")
+			_, _ = h.bot.Send(msg)
+			return nil
+		}
+		resp, err := http.Get(url)
+		if err != nil {
+			log.Printf("Failed to download audio: %v", err)
+			msg := tgbotapi.NewMessage(message.Chat.ID, "❌ Download failed for audio.")
+			_, _ = h.bot.Send(msg)
+			return nil
+		}
+		defer resp.Body.Close()
+		audioBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.Printf("Failed to read audio bytes: %v", err)
+			msg := tgbotapi.NewMessage(message.Chat.ID, "❌ Could not read audio data.")
+			_, _ = h.bot.Send(msg)
+			return nil
+		}
 
-        // Transcribe via Gemini
-        transcript, err := h.gemini.TranscribeAudio(audioBytes, mimeType)
-        if err != nil {
-            log.Printf("Gemini transcription failed: %v", err)
-            msg := tgbotapi.NewMessage(message.Chat.ID, "❌ Transcription failed.")
-            _, _ = h.bot.Send(msg)
-            return nil
-        }
+		// Transcribe via Gemini
+		transcript, err := h.gemini.TranscribeAudio(audioBytes, mimeType)
+		if err != nil {
+			log.Printf("Gemini transcription failed: %v", err)
+			msg := tgbotapi.NewMessage(message.Chat.ID, "❌ Transcription failed.")
+			_, _ = h.bot.Send(msg)
+			return nil
+		}
 
-        // Store as pending task with the transcribed text
-        message.Text = transcript
-        h.storePendingTask(message)
+		// Store as pending task with the transcribed text
+		message.Text = transcript
+		h.storePendingTask(message)
 
-        // Brief confirmation
-        preview := transcript
-        if len([]rune(preview)) > 200 {
-            previewRunes := []rune(preview)
-            preview = string(previewRunes[:200]) + "..."
-        }
-        confirm := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("📝 Transcribed. Add 👍 to save.\n%s", preview))
-        _, _ = h.bot.Send(confirm)
-        return nil
-    }
+		// Brief confirmation
+		preview := transcript
+		if len([]rune(preview)) > 200 {
+			previewRunes := []rune(preview)
+			preview = string(previewRunes[:200]) + "..."
+		}
+		confirm := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("📝 Transcribed. Add 👍 to save.\n%s", preview))
+		_, _ = h.bot.Send(confirm)
+		return nil
+	}
 
-    // Handle regular commands
-    switch message.Text {
-    case "/start":
-        return h.handleStart(message)
-    case "Open Mini App":
+	// Handle regular commands
+	switch message.Text {
+	case "/start":
+		return h.handleStart(message)
+	case "Open Mini App":
 		return h.handleMiniAppButton(message)
 	case "/cron":
 		return h.handleCronCommand(message)
+	case "/tags":
+		return h.handleTagsCommand(message)
 	default:
 		// Any other text is treated as a potential task, stored and waiting for reaction
 		h.storePendingTask(message)
@@ -248,6 +250,113 @@ func (h *Handler) handleCronCommand(message *tgbotapi.Message) error {
 	msg := tgbotapi.NewMessage(message.Chat.ID, "✅ Task check triggered! Check logs for results.")
 	_, err := h.bot.Send(msg)
 	return err
+}
+
+// handleTagsCommand tags all existing tasks using Gemini AI
+func (h *Handler) handleTagsCommand(message *tgbotapi.Message) error {
+	if h.gemini == nil {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "❌ Gemini AI not configured")
+		_, err := h.bot.Send(msg)
+		return err
+	}
+
+	// Send initial message
+	msg := tgbotapi.NewMessage(message.Chat.ID, "🏷️ Starting to tag all tasks... This may take a while.")
+	h.bot.Send(msg)
+
+	// Run tagging in background
+	go func() {
+		ctx := context.Background()
+		log.Printf("/tags command: Starting to tag all tasks")
+
+		// Get all non-done tasks (up to 1000)
+		tasks, err := h.notion.GetRecentTasks(ctx, "tasks", 1000)
+		if err != nil {
+			log.Printf("Error retrieving tasks for tagging: %v", err)
+			errorMsg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("❌ Failed to retrieve tasks: %v", err))
+			h.bot.Send(errorMsg)
+			return
+		}
+
+		log.Printf("/tags command: Found %d tasks to tag", len(tasks))
+
+		taggedCount := 0
+		skippedCount := 0
+		errorCount := 0
+
+		for i, task := range tasks {
+			log.Printf("/tags command: Processing task %d/%d: %s", i+1, len(tasks), task.Title)
+
+			// Check if task already has llm_tag
+			if existingTag, ok := task.Properties["llm_tag"].(string); ok && existingTag != "" {
+				log.Printf("/tags command: Task %s already has llm_tag '%s', skipping", task.ID, existingTag)
+				skippedCount++
+				continue
+			}
+
+			// Double-check: Skip if status is "done" (in case filter didn't catch it)
+			if status, ok := task.Properties["status"].(string); ok && status == "done" {
+				log.Printf("/tags command: Task %s has status 'done', skipping", task.ID)
+				skippedCount++
+				continue
+			}
+
+			// Double-check: Skip if task has "sometimes-later" tag (in case filter didn't catch it)
+			if tags, ok := task.Properties["Tags"]; ok {
+				if tagList, ok := tags.([]string); ok {
+					hasSometimesLater := false
+					for _, tag := range tagList {
+						if tag == "sometimes-later" {
+							hasSometimesLater = true
+							break
+						}
+					}
+					if hasSometimesLater {
+						log.Printf("/tags command: Task %s has 'sometimes-later' tag, skipping", task.ID)
+						skippedCount++
+						continue
+					}
+				}
+			}
+
+			// Get tag from Gemini
+			tag, err := h.gemini.TagTask(task.Title)
+			if err != nil {
+				log.Printf("/tags command: Failed to tag task %s: %v", task.ID, err)
+				errorCount++
+				// Use default tag on error
+				tag = "task"
+			}
+
+			// Update task in Notion
+			if err := h.notion.UpdateTaskLLMTag(task.ID, tag); err != nil {
+				log.Printf("/tags command: Failed to update task %s in Notion: %v", task.ID, err)
+				errorCount++
+			} else {
+				log.Printf("/tags command: Successfully tagged task %s as '%s'", task.ID, tag)
+				taggedCount++
+			}
+
+			// Small delay to avoid rate limits
+			time.Sleep(500 * time.Millisecond)
+		}
+
+		// Send summary
+		summary := fmt.Sprintf(
+			"✅ Tagging complete!\n\n"+
+				"📊 Summary:\n"+
+				"• Tagged: %d tasks\n"+
+				"• Skipped (already tagged): %d\n"+
+				"• Errors: %d\n"+
+				"• Total processed: %d",
+			taggedCount, skippedCount, errorCount, len(tasks))
+
+		summaryMsg := tgbotapi.NewMessage(message.Chat.ID, summary)
+		h.bot.Send(summaryMsg)
+		log.Printf("/tags command: Completed. Tagged=%d, Skipped=%d, Errors=%d", taggedCount, skippedCount, errorCount)
+	}()
+
+	return nil
 }
 
 // MessageReactionUpdate represents an update to message reactions
