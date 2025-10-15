@@ -76,21 +76,23 @@ graph TB
 ### AI-Powered Task Management
 
 When you create a task, the bot automatically:
-1. **Tags it with AI**: Uses Gemini to categorize as:
+1. **Tags it with AI**: Uses Gemini 2.0 Flash Lite to categorize as:
    - `link` - Just a URL/link
    - `journal` - Personal thoughts, emotions, observations
-   - `date` - Mentions a deadline or date
+   - `date` - Mentions a deadline, date, OR any university/academic work (including Software Engineering topics like highload, data analysis, algorithms, databases, ITMO University subjects, labs, assignments, exams)
    - `task` - Regular task
+   - **Tag is stored in Notion's `llm_tag` property**
 
-2. **Daily Check (11 PM)**: Reviews all tasks from the past 24 hours and sends reminders:
+2. **Daily Check (11 PM)**: Reviews ALL non-done tasks (without `sometimes-later` tag) and sends reminders:
    - ⏰ **Date tasks without dates**: "You mentioned a deadline but didn't set a date"
    - 📔 **Journal entries**: "This looks like a journal entry, consider moving it"
    - 🔗 **Link-only tasks**: "Please give this link a descriptive name"
 
 **Benefits:**
-- Never forget to add dates to time-sensitive tasks
+- Never forget to add dates to time-sensitive tasks (especially university work)
 - Keep your task database clean and organized
 - Automatic suggestions for better task management
+- All metadata stored directly in Notion (no local database needed)
 
 ### Managing Tasks
 
