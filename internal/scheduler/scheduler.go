@@ -10,6 +10,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/jomei/notionapi"
+	"github.com/numero_quadro/notion-mini-app/internal/gemini"
 	"github.com/numero_quadro/notion-mini-app/internal/notion"
 )
 
@@ -19,10 +20,11 @@ type Scheduler struct {
 	authorizedUserID int64
 	checkTime        string // Format: "15:04" (HH:MM in 24-hour format)
 	timezone         *time.Location
+	geminiClient     *gemini.Client
 }
 
 // NewScheduler creates a new scheduler instance
-func NewScheduler(notionClient *notion.Client, bot *tgbotapi.BotAPI, authorizedUserID int64, checkTime string) *Scheduler {
+func NewScheduler(notionClient *notion.Client, bot *tgbotapi.BotAPI, authorizedUserID int64, checkTime string, geminiClient *gemini.Client) *Scheduler {
 	if checkTime == "" {
 		checkTime = "23:00" // Default to 11 PM
 	}
@@ -47,6 +49,7 @@ func NewScheduler(notionClient *notion.Client, bot *tgbotapi.BotAPI, authorizedU
 		authorizedUserID: authorizedUserID,
 		checkTime:        checkTime,
 		timezone:         location,
+		geminiClient:     geminiClient,
 	}
 }
 
@@ -87,10 +90,20 @@ func (s *Scheduler) RunManualCheck() {
 func (s *Scheduler) checkTasks(ctx context.Context) {
 	log.Printf("Starting task check...")
 
+	// Step 0: Ensure all undone tasks (excluding 'sometimes-later') have llm_tag set
+	// This covers tasks added directly in Notion bypassing the bot.
+	if err := s.ensureTagsForUndoneTasks(ctx); err != nil {
+		log.Printf("Error ensuring tags for undone tasks: %v", err)
+		errorMsg := tgbotapi.NewMessage(s.authorizedUserID,
+			fmt.Sprintf("❌ Error preparing tasks for check: %v", err))
+		s.bot.Send(errorMsg)
+		return
+	}
+
 	// Send header message to separate this batch from previous ones
 	checkTime := time.Now().In(s.timezone)
-	headerMsg := tgbotapi.NewMessage(s.authorizedUserID, 
-		fmt.Sprintf("━━━━━━━━━━━━━━━━━━━━\n📋 **Daily Task Check**\n🕐 %s\n━━━━━━━━━━━━━━━━━━━━", 
+	headerMsg := tgbotapi.NewMessage(s.authorizedUserID,
+		fmt.Sprintf("━━━━━━━━━━━━━━━━━━━━\n📋 **Daily Task Check**\n🕐 %s\n━━━━━━━━━━━━━━━━━━━━",
 			checkTime.Format("Mon, 02 Jan 2006 15:04 MST")))
 	headerMsg.ParseMode = "Markdown"
 	s.bot.Send(headerMsg)
@@ -99,7 +112,7 @@ func (s *Scheduler) checkTasks(ctx context.Context) {
 	tasks, err := s.notionClient.GetRecentTasks(ctx, "tasks", 1000) // Get up to 1000 tasks
 	if err != nil {
 		log.Printf("Error retrieving tasks from Notion: %v", err)
-		errorMsg := tgbotapi.NewMessage(s.authorizedUserID, 
+		errorMsg := tgbotapi.NewMessage(s.authorizedUserID,
 			fmt.Sprintf("❌ Error checking tasks: %v", err))
 		s.bot.Send(errorMsg)
 		return
@@ -142,7 +155,7 @@ func (s *Scheduler) checkTasks(ctx context.Context) {
 	} else {
 		footerText = fmt.Sprintf("📊 Found %d task(s) needing attention", notificationCount)
 	}
-	footerMsg := tgbotapi.NewMessage(s.authorizedUserID, 
+	footerMsg := tgbotapi.NewMessage(s.authorizedUserID,
 		fmt.Sprintf("━━━━━━━━━━━━━━━━━━━━\n%s\n━━━━━━━━━━━━━━━━━━━━", footerText))
 	s.bot.Send(footerMsg)
 
@@ -227,4 +240,63 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return string(runes[:maxLen]) + "..."
+}
+
+// ensureTagsForUndoneTasks tags all undone tasks (excluding 'sometimes-later') that lack an llm_tag
+// Returns an error if the operation fails critically
+func (s *Scheduler) ensureTagsForUndoneTasks(ctx context.Context) error {
+	if s.geminiClient == nil {
+		log.Printf("Gemini client not configured; skipping pre-tagging step")
+		return nil
+	}
+
+	// Fetch a broad set of undone tasks without 'sometimes-later'
+	tasks, err := s.notionClient.GetUndoneTasksExcludingSometimesLater(ctx, "tasks", 1000)
+	if err != nil {
+		log.Printf("Pre-tagging: failed to fetch tasks: %v", err)
+		return fmt.Errorf("failed to fetch tasks: %w", err)
+	}
+
+	log.Printf("Found %d tasks to check for tagging", len(tasks))
+
+	tagged := 0
+	skipped := 0
+	errors := 0
+
+	for _, task := range tasks {
+		// Skip if already tagged
+		if existingTag, ok := task.Properties["llm_tag"].(string); ok && strings.TrimSpace(existingTag) != "" {
+			skipped++
+			continue
+		}
+
+		// Get tag from Gemini
+		tag, err := s.geminiClient.TagTask(task.Title)
+		if err != nil || strings.TrimSpace(tag) == "" {
+			if err != nil {
+				log.Printf("Pre-tagging: gemini failed for %s: %v", task.ID, err)
+			}
+			tag = "task"
+		}
+
+		if err := s.notionClient.UpdateTaskLLMTag(task.ID, tag); err != nil {
+			log.Printf("Pre-tagging: failed to update llm_tag for %s: %v", task.ID, err)
+			errors++
+		} else {
+			log.Printf("Pre-tagging: successfully tagged task %s with '%s'", task.ID, tag)
+			tagged++
+		}
+
+		// Small delay to avoid rate limits
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	log.Printf("Pre-tagging complete. tagged=%d skipped=%d errors=%d", tagged, skipped, errors)
+
+	// If we had critical errors, return an error
+	if errors > 0 && errors == len(tasks) {
+		return fmt.Errorf("failed to tag any tasks, %d errors occurred", errors)
+	}
+
+	return nil
 }

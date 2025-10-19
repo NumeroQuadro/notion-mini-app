@@ -694,6 +694,119 @@ func (c *Client) GetRecentTasks(ctx context.Context, dbType string, limit int) (
 	return tasks, nil
 }
 
+// GetUndoneTasksExcludingSometimesLater retrieves all undone tasks excluding those tagged 'sometimes-later'.
+// Unlike GetRecentTasks fallback, this does NOT filter out tasks that already have a Date.
+func (c *Client) GetUndoneTasksExcludingSometimesLater(ctx context.Context, dbType string, limit int) ([]Task, error) {
+    dbID := c.getDbIDForType(dbType)
+    if dbID == "" {
+        return nil, fmt.Errorf("database ID for %s not configured", dbType)
+    }
+
+    // Build query: status != done AND tags does not contain 'sometimes-later'
+    query := &notionapi.DatabaseQueryRequest{
+        Filter: notionapi.AndCompoundFilter{
+            notionapi.PropertyFilter{
+                Property: "status",
+                Select: &notionapi.SelectFilterCondition{
+                    DoesNotEqual: "done",
+                },
+            },
+            notionapi.PropertyFilter{
+                Property: "tags",
+                MultiSelect: &notionapi.MultiSelectFilterCondition{
+                    DoesNotContain: "sometimes-later",
+                },
+            },
+        },
+        Sorts: []notionapi.SortObject{
+            {
+                Property:  "Created time",
+                Direction: "descending",
+            },
+        },
+        PageSize: limit,
+    }
+
+    response, err := c.client.Database.Query(ctx, notionapi.DatabaseID(dbID), query)
+    if err != nil {
+        if strings.Contains(err.Error(), "unsupported property type: button") {
+            log.Printf("Warning: Button property detected during tagging query. Using workaround...")
+            return c.getUndoneTasksExcludingSometimesLaterWorkaround(ctx, dbID, limit)
+        }
+        return nil, fmt.Errorf("failed to query database: %w", err)
+    }
+
+    tasks := make([]Task, 0, len(response.Results))
+    for _, page := range response.Results {
+        task, err := c.transformPageToTask(page)
+        if err != nil {
+            log.Printf("Warning: Could not transform page %s: %v", page.ID, err)
+            continue
+        }
+        tasks = append(tasks, task)
+    }
+    return tasks, nil
+}
+
+// getUndoneTasksExcludingSometimesLaterWorkaround fetches tasks and manually filters without excluding dated tasks.
+func (c *Client) getUndoneTasksExcludingSometimesLaterWorkaround(ctx context.Context, dbID string, limit int) ([]Task, error) {
+    // Simple query without filters; we'll filter manually
+    queryRequest := &notionapi.DatabaseQueryRequest{
+        Sorts: []notionapi.SortObject{
+            {
+                Property:  "Created time",
+                Direction: "descending",
+            },
+        },
+        PageSize: 200, // fetch more to allow manual filtering
+    }
+
+    response, err := c.client.Database.Query(ctx, notionapi.DatabaseID(dbID), queryRequest)
+    if err != nil {
+        return nil, fmt.Errorf("failed to query database: %w", err)
+    }
+
+    tasks := make([]Task, 0, limit)
+    for _, page := range response.Results {
+        if len(tasks) >= limit {
+            break
+        }
+
+        // Skip done
+        if statusProp, ok := page.Properties["status"]; ok {
+            if selectProp, ok := statusProp.(*notionapi.SelectProperty); ok {
+                if strings.EqualFold(selectProp.Select.Name, "done") {
+                    continue
+                }
+            }
+        }
+
+        // Skip if tags contain 'sometimes-later'
+        if tagsProp, ok := page.Properties["Tags"]; ok {
+            if multiSelectProp, ok := tagsProp.(*notionapi.MultiSelectProperty); ok {
+                hasSometimesLater := false
+                for _, tag := range multiSelectProp.MultiSelect {
+                    if tag.Name == "sometimes-later" {
+                        hasSometimesLater = true
+                        break
+                    }
+                }
+                if hasSometimesLater {
+                    continue
+                }
+            }
+        }
+
+        task, err := c.transformPageToTask(page)
+        if err != nil {
+            log.Printf("Warning: Could not transform page %s: %v", page.ID, err)
+            continue
+        }
+        tasks = append(tasks, task)
+    }
+
+    return tasks, nil
+}
 // transformPageToTask converts a Notion page to a Task struct
 func (c *Client) transformPageToTask(page notionapi.Page) (Task, error) {
 	task := Task{

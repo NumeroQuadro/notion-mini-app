@@ -82,8 +82,8 @@ func main() {
 		schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
 		defer schedulerCancel()
 
-		schedulerInstance := scheduler.NewScheduler(notionClient, botAPI, authorizedUserIDInt, "23:00")
-		globalScheduler = schedulerInstance
+        schedulerInstance := scheduler.NewScheduler(notionClient, botAPI, authorizedUserIDInt, "23:00", geminiClient)
+        globalScheduler = schedulerInstance
 
 		// Link scheduler to handler for /cron command
 		handler.SetScheduler(schedulerInstance)
